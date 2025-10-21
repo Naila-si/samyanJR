@@ -1,0 +1,45 @@
+{
+  "name": "spa",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^7.3.2",
+    "framer-motion": "^12.23.21",
+    "html2canvas": "^1.4.1",
+    "jsbarcode": "^3.12.1",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "3.8.2",
+    "leaflet": "1.9.4",
+    "leaflet.heat": "0.2.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.4.296",
+    "react": "19.1.1",
+    "react-data-table-component": "^7.7.0",
+    "react-dom": "19.1.1",
+    "react-hot-toast": "^2.6.0",
+    "react-leaflet": "5.0.0",
+    "react-router-dom": "6.30.1",
+    "recharts": "^3.2.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.33.0",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "5.0.0",
+    "eslint": "^9.33.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "vite": "^7.1.2"
+  }
+}
