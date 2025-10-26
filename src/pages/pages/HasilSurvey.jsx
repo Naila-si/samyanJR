@@ -637,7 +637,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         </div>
       </section>
 
-      {/* TTD & PEJABAT */}
+      {/* TTD & PEJABAT
       <section className="card">
         <div className="row">
           <div>
@@ -654,7 +654,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
             </div>
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* AKSI */}
       <div className="actions">

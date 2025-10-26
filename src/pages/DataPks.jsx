@@ -1,19 +1,11 @@
-// src/pages/DataPks.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchAllDataPks, upsertDataPks, deleteDataPksByLocalId } from "../lib/datapksRepo";
+import "./DataPks.css";
 
 const LS_KEY = "datapks_rows";
-
-const DUMMY = [
-  { id: "1", namaRS: "RSUD ARIFIN ACHMAD - PEKANBARU", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2021-10-15", tglAkhir: "2026-10-15", noRS: "027/Dir.Keuangan/RSUD/2021/1124", noJR: "P/13.2/SP/2021" },
-  { id: "2", namaRS: "RS AWAL BROS - PEKANBARU", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2022-07-05", tglAkhir: "2027-07-05", noRS: "010/RSAB-JR/PKS/08.2022", noJR: "P/33/SP/2022" },
-  { id: "3", namaRS: "RSUD DUMAI", wilayah: "DUMAI", masaBerlaku: 5, tglAwal: "2022-09-01", tglAkhir: "2027-09-01", noRS: "006/NLM/RSTAN/SPK/X/2022", noJR: "P/53/SP/2022" },
-  // tambahkan sample lain biar popup panjang
-  { id: "4", namaRS: "RS BINA KASIH PEKANBARU", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2022-09-02", tglAkhir: "2027-09-02", noRS: "007/RSBK/SPK/DIR/VIII/2022", noJR: "P/39/SP/2022" },
-  { id: "5", namaRS: "RS TELUK KUANTAN", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2022-08-01", tglAkhir: "2027-08-01", noRS: "445/RSUD-TU/0145", noJR: "P/24.1/SP/2022" },
-  { id: "6", namaRS: "RS PRIMA PEKANBARU", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2022-09-05", tglAkhir: "2027-09-05", noRS: "2944-B/RSPP/PKS/IX/2022", noJR: "P/36/SP/2022" },
-  { id: "7", namaRS: "RSUD PETALA BUMI", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2023-07-03", tglAkhir: "2028-07-03", noRS: "445/RSUD-PB/MOU/VII/2023/937", noJR: "P/33/SP/2023" },
-  { id: "8", namaRS: "RS TK.IV TENTARA", wilayah: "RIAU", masaBerlaku: 5, tglAwal: "2023-05-02", tglAkhir: "2028-05-02", noRS: "B/213/Mei/2023", noJR: "P/12/SP/2023" },
-];
+const firePKSChanged = () => {
+  try { window.dispatchEvent(new CustomEvent("datapks:changed")); } catch {}
+};
 
 export default function DataPks() {
   const [rows, setRows] = useState([]);
@@ -54,18 +46,87 @@ export default function DataPks() {
       ? new Date(d).toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
       : "-";
 
-  // ===== init =====
+  // ===== Pagination =====
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
+  // Sort → filter → paginate (urutkan dulu biar konsisten)
+  const sortedFiltered = useMemo(() => {
+    const base = (!q.trim()
+      ? rows
+      : rows.filter((r) =>
+          [r.namaRS, r.wilayah, r.noRS, r.noJR]
+            .join("|")
+            .toLowerCase()
+            .includes(q.trim().toLowerCase())
+        )
+    )
+      .map((r) => ({ ...r, _days: daysLeft(r.tglAkhir) }))
+      .sort((a, b) => a._days - b._days);
+
+    return base;
+  }, [rows, q]);
+
+  const total = sortedFiltered.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const pageStartIndex = (page - 1) * pageSize;
+  const pageEndIndex = Math.min(page * pageSize, total);
+  const currentRows = sortedFiltered.slice(pageStartIndex, pageEndIndex);
+
+  // Pastikan page valid saat filter/rows berubah
   useEffect(() => {
-    const saved = localStorage.getItem(LS_KEY);
-    if (saved) setRows(JSON.parse(saved));
-    else {
-      setRows(DUMMY);
-      localStorage.setItem(LS_KEY, JSON.stringify(DUMMY));
+    // reset ke halaman 1 kalau pencarian atau pageSize berubah
+    setPage(1);
+  }, [q, pageSize]);
+
+  useEffect(() => {
+    // clamp kalau total halaman berkurang
+    if (page > totalPages) setPage(totalPages);
+  }, [totalPages, page]);
+
+  useEffect(() => {
+    // 1) Ambil dari cache lokal dulu biar UI cepat muncul
+    const cached = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+    if (cached.length) {
+      // Normalisasi wilayah di cache
+      const fixedCache = cached.map(r => ({
+        ...r,
+        wilayah: r.wilayah === "DUMAI" ? "PWK. DUMAI" : r.wilayah,
+      }));
+      setRows(fixedCache);
+      localStorage.setItem(LS_KEY, JSON.stringify(fixedCache));
+      firePKSChanged();
     }
+
+    // 2) Coba ambil dari Supabase
+    (async () => {
+      try {
+        const remote = await fetchAllDataPks();
+
+        if (Array.isArray(remote) && remote.length > 0) {
+          // Normalisasi wilayah hasil fetch
+          const fixedRemote = remote.map(r => ({
+            ...r,
+            wilayah: r.wilayah === "DUMAI" ? "PWK. DUMAI" : r.wilayah,
+          }));
+
+          setRows(fixedRemote);
+          localStorage.setItem(LS_KEY, JSON.stringify(fixedRemote));
+          firePKSChanged();
+        } else {
+          console.warn("[DataPKS] Remote kosong, keep local cache.");
+        }
+      } catch (e) {
+        console.error("[DataPKS] Fetch Supabase gagal, keep local cache:", e);
+        // biarkan rows tetap pakai cache yang sudah di-set di atas
+      }
+    })();
   }, []);
+
   const persist = (arr) => {
     setRows(arr);
     localStorage.setItem(LS_KEY, JSON.stringify(arr));
+    firePKSChanged();
   };
 
   // ===== CRUD =====
@@ -81,28 +142,67 @@ export default function DataPks() {
     });
     setEditing(null);
   };
-  const onSubmit = (e) => {
+
+  const onSubmit = async (e) => {
     e.preventDefault();
-    if (!form.namaRS || !form.tglAwal || !form.tglAkhir) {
+
+    // validasi sederhana
+    const namaRS = (form.namaRS || "").trim();
+    if (!namaRS || !form.tglAwal || !form.tglAkhir) {
       alert("Lengkapi Nama RS, Tanggal Awal, dan Tanggal Akhir.");
       return;
     }
-    if (editing) {
-      const upd = rows.map((r) => (r.id === editing ? { ...r, ...form } : r));
-      persist(upd);
-    } else {
-      persist([{ ...form, id: String(Date.now()) }, ...rows]);
+    if (new Date(form.tglAkhir) < new Date(form.tglAwal)) {
+      alert("Tanggal Akhir tidak boleh lebih awal dari Tanggal Awal.");
+      return;
     }
-    resetForm();
+
+    // record konsisten
+    const localId = editing ?? String(Date.now());
+    const record = {
+      id: localId,
+      namaRS: namaRS,
+      wilayah: form.wilayah || "RIAU",
+      masaBerlaku: Number(form.masaBerlaku) || 0,
+      tglAwal: form.tglAwal,
+      tglAkhir: form.tglAkhir,
+      noRS: (form.noRS || "").trim(),
+      noJR: (form.noJR || "").trim(),
+    };
+
+    try {
+      const saved = await upsertDataPks(record); // sinkron server
+      const next = editing ? rows.map((r) => (r.id === editing ? saved : r)) : [saved, ...rows];
+      persist(next);
+      resetForm();
+    } catch (err) {
+      console.error("Simpan ke Supabase gagal:", err);
+      // simpan lokal agar tidak hilang
+      const next = editing ? rows.map((r) => (r.id === editing ? record : r)) : [record, ...rows];
+      persist(next);
+      resetForm();
+      alert("Gagal menyimpan ke server. Disimpan lokal & akan dicoba sinkron lagi saat koneksi OK.");
+    }
   };
+
   const onEdit = (r) => {
     setEditing(r.id);
     setForm({ ...r });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
-  const onDelete = (id) => {
+
+  const onDelete = async (id) => {
     if (!confirm("Hapus data ini?")) return;
-    persist(rows.filter((r) => r.id !== id));
+
+    try {
+      await deleteDataPksByLocalId(id); // hapus di Supabase
+    } catch (e) {
+      console.warn("Hapus di Supabase gagal (akan tetap hapus lokal):", e);
+    }
+
+    const next = rows.filter((r) => r.id !== id);
+    persist(next);
+    if (editing === id) resetForm();
   };
 
   // ===== Filter pencarian =====
@@ -110,18 +210,16 @@ export default function DataPks() {
     const key = q.trim().toLowerCase();
     return !key
       ? rows
-      : rows.filter((r) =>
-          [r.namaRS, r.wilayah, r.noRS, r.noJR].join("|").toLowerCase().includes(key)
-        );
+      : rows.filter((r) => [r.namaRS, r.wilayah, r.noRS, r.noJR].join("|").toLowerCase().includes(key));
   }, [rows, q]);
 
-  // ====== Siren (lebih warning) ======
+  // ====== Siren ======
   const siren = async (seconds = 3, cycles = 2) => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const ctx = new AudioCtx();
       const master = ctx.createGain();
-      master.gain.value = 0.15; // volume
+      master.gain.value = 0.15;
       master.connect(ctx.destination);
 
       const endAt = ctx.currentTime + seconds * cycles;
@@ -129,7 +227,6 @@ export default function DataPks() {
         const osc = ctx.createOscillator();
         osc.type = "sawtooth";
         osc.connect(master);
-        // sweep naik–turun (woo-woo)
         const start = ctx.currentTime + c * seconds;
         const mid = start + seconds / 2;
         const stop = start + seconds;
@@ -139,25 +236,18 @@ export default function DataPks() {
         osc.start(start);
         osc.stop(stop);
       }
-
-      // Vibrate kuat
       if (navigator.vibrate) {
         const pattern = [];
         for (let i = 0; i < cycles * 6; i++) pattern.push(220, 120);
         navigator.vibrate(pattern);
       }
-
-      // otomatis close context
       setTimeout(() => ctx.close(), (endAt - ctx.currentTime) * 1000 + 200);
-    } catch {
-      /* noop */
-    }
+    } catch {}
   };
 
-  // ===== Notifikasi & Modal (pastikan semua data muncul) =====
+  // ===== Notifikasi & Modal =====
   const checkDue = (list = rows) => {
     const sorted = [...list].map((r) => ({ ...r, _days: daysLeft(r.tglAkhir) }));
-    // urutkan paling genting
     sorted.sort((a, b) => a._days - b._days);
 
     const overdue = sorted.filter((r) => r._days <= 0);
@@ -172,9 +262,7 @@ export default function DataPks() {
     if (level) {
       setDueGroups({ overdue, h14, h30 });
       setDueModal(true);
-      // bunyikan hanya saat level berubah (hindari spam)
       if (lastLevelRef.current !== level) {
-        // siren makin kuat sesuai level
         if (level === "overdue") siren(3, 3);
         else if (level === "h14") siren(2.5, 2);
         else siren(2, 2);
@@ -198,11 +286,10 @@ export default function DataPks() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ===== Badge warna =====
   const badgeFor = (dLeft) => {
     if (dLeft <= 0) return { cls: "pill red", text: dLeft === 0 ? "Hari ini" : `${Math.abs(dLeft)} hari lewat` };
     if (dLeft <= 14) return { cls: "pill red", text: `${dLeft} hari lagi` };
-    if (dLeft <= 30) return { cls: "pill", text: `${dLeft} hari lagi` }; // oranye bisa dibuat di CSS .pill.orange
+    if (dLeft <= 30) return { cls: "pill", text: `${dLeft} hari lagi` };
     return { cls: "pill green", text: `${dLeft} hari lagi` };
   };
 
@@ -215,7 +302,7 @@ export default function DataPks() {
           <span className="df-ribbon">🤝</span>
         </div>
         <p className="df-sub">
-          Notifikasi otomatis saat H-30, H-14, dan <b>jatuh tempo</b>. Wilayah: <b>RIAU</b> / <b>DUMAI</b>.
+          Notifikasi otomatis saat H-30, H-14, dan <b>jatuh tempo</b>. Wilayah: <b>RIAU</b> / <b>PWK. DUMAI</b>.
         </p>
       </div>
 
@@ -240,7 +327,7 @@ export default function DataPks() {
             <label>Wilayah</label>
             <select value={form.wilayah} onChange={(e) => setForm((f) => ({ ...f, wilayah: e.target.value }))}>
               <option value="RIAU">RIAU</option>
-              <option value="DUMAI">DUMAI</option>
+              <option value="PWK. DUMAI">PWK. DUMAI</option>
             </select>
           </div>
 
@@ -276,19 +363,47 @@ export default function DataPks() {
       </div>
 
       {/* Tabel */}
+      {/* Pager Atas: hanya page size + info */}
+      {total > 0 && (
+        <div className="df-pager" style={{ marginTop: 8 }}>
+          <div className="df-pager-left">
+            <span className="df-pager-info">
+              Menampilkan <b>{pageStartIndex + 1}</b>–<b>{pageEndIndex}</b> dari <b>{total}</b>
+            </span>
+          </div>
+          <div className="df-pager-right">
+            <label className="muted" htmlFor="page-size" style={{ marginRight: 8 }}>
+              Baris / halaman
+            </label>
+            <select
+              id="page-size"
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              className="df-select"
+              aria-label="Baris per halaman"
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </div>
+        </div>
+      )}
+
       <div className="df-card table-wrap" style={{ marginTop: 14 }}>
         <table className="nice-table wide-table">
           <colgroup>
-            <col style={{width: '56px'}} />       {/* No */}
-            <col style={{width: '320px'}} />      {/* Nama RS */}
-            <col style={{width: '110px'}} />      {/* Wilayah */}
-            <col style={{width: '80px'}} />       {/* Masa */}
-            <col style={{width: '120px'}} />      {/* Tgl Awal */}
-            <col style={{width: '120px'}} />      {/* Tgl Akhir */}
-            <col style={{width: '140px'}} />      {/* Jatuh Tempo */}
-            <col style={{width: '260px'}} />      {/* No Perjanjian RS */}
-            <col style={{width: '220px'}} />      {/* No Perjanjian JR */}
-            <col style={{width: '110px'}} />      {/* Aksi */}
+            <col style={{width: '56px'}} />
+            <col style={{width: '320px'}} />
+            <col style={{width: '110px'}} />
+            <col style={{width: '80px'}} />
+            <col style={{width: '120px'}} />
+            <col style={{width: '120px'}} />
+            <col style={{width: '140px'}} />
+            <col style={{width: '260px'}} />
+            <col style={{width: '220px'}} />
+            <col style={{width: '110px'}} />
           </colgroup>
           <thead>
             <tr>
@@ -305,7 +420,7 @@ export default function DataPks() {
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {total === 0 ? (
               <tr>
                 <td colSpan={10} className="df-empty">
                   <div className="df-empty-emoji">🫥</div>
@@ -313,48 +428,85 @@ export default function DataPks() {
                 </td>
               </tr>
             ) : (
-              filtered
-                .map((r) => ({ ...r, _days: daysLeft(r.tglAkhir) }))
-                .sort((a, b) => a._days - b._days)
-                .map((r, i) => {
-                  const badge = badgeFor(r._days);
-                  return (
-                    <tr key={r.id}>
-                      <td data-label="No">{i + 1}</td>
-                      <td data-label="Nama RS">{r.namaRS}</td>
-                      <td data-label="Wilayah">{r.wilayah}</td>
-                      <td data-label="Masa">{r.masaBerlaku} th</td>
-                      <td data-label="Tgl Awal">{fmtDate(r.tglAwal)}</td>
-                      <td data-label="Tgl Akhir">{fmtDate(r.tglAkhir)}</td>
-                      <td data-label="Jatuh Tempo">
-                        <span className={badge.cls}>{badge.text}</span>
-                      </td>
-                      <td data-label="No Perjanjian RS">{r.noRS}</td>
-                      <td data-label="No Perjanjian JR">{r.noJR}</td>
-                      <td data-label="Aksi">
-                        <div className="df-actions">
-                          <button
-                            className="df-btn"
-                            onClick={() => onEdit(r)}
-                            title="Edit"
-                          >
-                            ✏️
-                          </button>
-                          <button
-                            className="df-btn df-danger"
-                            onClick={() => onDelete(r.id)}
-                            title="Hapus"
-                          >
-                            🗑️
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
+              currentRows.map((r, i) => {
+                const badge = badgeFor(r._days);
+                const displayNo = pageStartIndex + i + 1;
+                return (
+                  <tr key={r.id}>
+                    <td data-label="No">{displayNo}</td>
+                    <td data-label="Nama RS">{r.namaRS}</td>
+                    <td data-label="Wilayah">{r.wilayah}</td>
+                    <td data-label="Masa">{r.masaBerlaku} th</td>
+                    <td data-label="Tgl Awal">{fmtDate(r.tglAwal)}</td>
+                    <td data-label="Tgl Akhir">{fmtDate(r.tglAkhir)}</td>
+                    <td data-label="Jatuh Tempo">
+                      <span className={badge.cls}>{badge.text}</span>
+                    </td>
+                    <td data-label="No Perjanjian RS">{r.noRS}</td>
+                    <td data-label="No Perjanjian JR">{r.noJR}</td>
+                    <td data-label="Aksi">
+                      <div className="df-actions">
+                        <button className="df-btn" onClick={() => onEdit(r)} title="Edit">✏️</button>
+                        <button className="df-btn df-danger" onClick={() => onDelete(r.id)} title="Hapus">🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
+
+        {/* Pager Bawah: tombol panah + info */}
+        {total > 0 && (
+          <div className="df-pager" style={{ marginTop: 10 }}>
+            <div className="df-pager-left">
+              <button
+                className="btn-ghost"
+                onClick={() => setPage(1)}
+                disabled={page === 1}
+                title="Halaman pertama"
+                aria-label="Halaman pertama"
+              >
+                ⏮️
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                title="Sebelumnya"
+                aria-label="Halaman sebelumnya"
+              >
+                ◀️ Prev
+              </button>
+
+              <span className="df-pager-info">
+                Halaman <b>{page}</b> dari <b>{totalPages}</b>
+                <span className="df-pager-sep">•</span>
+                Menampilkan <b>{pageStartIndex + 1}</b>–<b>{pageEndIndex}</b> dari <b>{total}</b>
+              </span>
+
+              <button
+                className="btn-ghost"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                title="Berikutnya"
+                aria-label="Halaman berikutnya"
+              >
+                Next ▶️
+              </button>
+              <button
+                className="btn-ghost"
+                onClick={() => setPage(totalPages)}
+                disabled={page === totalPages}
+                title="Halaman terakhir"
+                aria-label="Halaman terakhir"
+              >
+                ⏭️
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ==== MODAL Notifikasi: tampilkan SEMUA data, modal scrollable ==== */}
@@ -501,10 +653,19 @@ export default function DataPks() {
             .due-badge.amber{ color:#b45309; border-color:#fcd34d; background:#fff7ed; }
             .due-badge.green{ color:#166534; border-color:#bbf7d0; background:#ecfdf5; }
             @keyframes pulseGlow{0%,100%{box-shadow:0 28px 80px rgba(238,109,115,.35)}50%{box-shadow:0 36px 96px rgba(238,109,115,.55)}}
+            .df-pager{
+              display:flex; align-items:center; justify-content:space-between;
+              gap:12px;
+            }
+            .df-pager-left{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+            .df-pager-right{ display:flex; align-items:center; gap:8px; }
+            .df-pager-info{ color:#374151; }
+            .df-pager-sep{ margin:0 6px; color:#9CA3AF; }
+            .df-select{ padding:6px 10px; border-radius:8px; border:1px solid #E5E7EB; }
+            .btn-ghost[disabled]{ opacity:.45; cursor:not-allowed; }
           `}</style>
         </div>
       )}
     </div>
   );
 }
-

@@ -306,6 +306,285 @@ function ChatbotSPA() {
   );
 }
 
+// === Notif PKS ringan (di file SpaHero.jsx yang sama) ===
+const LS_KEY = "datapks_rows";
+
+function NotifPKS() {
+  const [dueModal, setDueModal] = useState(false);
+  const [groups, setGroups] = useState({ overdue: [], h14: [], h30: [] });
+
+  // helper tanggal
+  const normDate = (dStr) => {
+    if (!dStr) return null;
+    const d = new Date(dStr);
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  };
+  const today = () => {
+    const t = new Date();
+    return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  };
+  const daysLeft = (end) => {
+    const t = today().getTime();
+    const e = normDate(end)?.getTime() ?? 0;
+    return Math.ceil((e - t) / (1000 * 60 * 60 * 24));
+  };
+  const fmtDate = (d) =>
+    d
+      ? new Date(d).toLocaleDateString("id-ID", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "-";
+
+  const recompute = () => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+      // (opsional) samakan label wilayah seperti di DataPks
+      const rows = raw.map((r) => ({
+        ...r,
+        wilayah: r.wilayah === "DUMAI" ? "PWK. DUMAI" : r.wilayah,
+      }));
+      const withDays = rows.map((r) => ({ ...r, _days: daysLeft(r.tglAkhir) }));
+      withDays.sort((a, b) => a._days - b._days);
+
+      const overdue = withDays.filter((r) => r._days <= 0);
+      const h14 = withDays.filter((r) => r._days > 0 && r._days <= 14);
+      const h30 = withDays.filter((r) => r._days > 14 && r._days <= 30);
+      setGroups({ overdue, h14, h30 });
+    } catch (e) {
+      setGroups({ overdue: [], h14: [], h30: [] });
+    }
+  };
+
+  // dengerin perubahan cache + interval re-check
+  useEffect(() => {
+    recompute(); // on mount
+    const onChanged = () => recompute();
+    window.addEventListener("datapks:changed", onChanged);
+    window.addEventListener("storage", onChanged); // kalau tab lain update
+    const id = setInterval(recompute, 60 * 1000);
+    return () => {
+      window.removeEventListener("datapks:changed", onChanged);
+      window.removeEventListener("storage", onChanged);
+      clearInterval(id);
+    };
+  }, []);
+
+  const totalAlerts = groups.overdue.length + groups.h14.length + groups.h30.length;
+  if (totalAlerts === 0) return null; // nggak usah render apa-apa
+
+  return (
+    <>
+      {/* Tombol lonceng mengambang */}
+      <button
+        onClick={() => setDueModal(true)}
+        title="Peringatan PKS"
+        style={{
+          position: "fixed",
+          left: 16,
+          bottom: 16 + 58, // supaya nggak tabrakan sama chatbot kalau ada
+          zIndex: 9998,
+          border: "2px solid #fecaca",
+          background: "#fff1f2",
+          color: "#7f1d1d",
+          borderRadius: 999,
+          padding: "10px 14px",
+          fontWeight: 800,
+          boxShadow: "0 10px 24px rgba(0,0,0,.12)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        🔔 Peringatan PKS
+        <span
+          style={{
+            background: "#dc2626",
+            color: "#fff",
+            borderRadius: 999,
+            padding: "4px 8px",
+            fontSize: 12,
+            fontWeight: 900,
+          }}
+        >
+          {totalAlerts}
+        </span>
+      </button>
+
+      {/* Modal ringkas */}
+      {dueModal && (
+        <div
+          onClick={() => setDueModal(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,.45)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            zIndex: 9999,
+            cursor: "pointer",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            style={{
+              width: "min(880px, 96vw)",
+              maxHeight: "84vh",
+              overflow: "auto",
+              background: "#fff",
+              border: "2px solid #ff9aa2",
+              borderRadius: 16,
+              boxShadow: "0 28px 80px rgba(238,109,115,.35)",
+            }}
+          >
+            <div style={{ padding: "16px 20px 8px" }}>
+              <h3 style={{ margin: 0, color: "#b91c1c", fontWeight: 900 }}>
+                🚨 Peringatan PKS
+              </h3>
+              <p style={{ margin: "6px 0 0", color: "#374151" }}>
+                RS yang <b>jatuh tempo</b> atau berakhir ≤ <b>30 hari</b>.
+              </p>
+            </div>
+
+            {/* Seksi helper */}
+            {groups.overdue.length > 0 && (
+              <Section title={`Lewat / H0 (${groups.overdue.length})`}>
+                <List rows={groups.overdue} fmtDate={fmtDate} label={(d)=> (d._days===0?"Hari ini":`${Math.abs(d._days)} hari lewat`)} badgeCls="red" />
+              </Section>
+            )}
+            {groups.h14.length > 0 && (
+              <Section title={`≤ 14 Hari (${groups.h14.length})`}>
+                <List rows={groups.h14} fmtDate={fmtDate} label={(d)=> `${d._days} hari lagi`} badgeCls="red" />
+              </Section>
+            )}
+            {groups.h30.length > 0 && (
+              <Section title={`≤ 30 Hari (${groups.h30.length})`}>
+                <List rows={groups.h30} fmtDate={fmtDate} label={(d)=> `${d._days} hari lagi`} badgeCls="amber" />
+              </Section>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 20px 16px" }}>
+              <button
+                onClick={() => setDueModal(false)}
+                style={{
+                  background: "#ef4444",
+                  color: "#fff",
+                  border: "none",
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                }}
+              >
+                Mengerti
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// Sub-komponen kecil buat tabel ringkas di modal
+function Section({ title, children }) {
+  return (
+    <div style={{ padding: "10px 20px" }}>
+      <h4 style={{ margin: "10px 0 8px", color: "#b91c1c", fontWeight: 800, borderLeft: "4px solid #ff9aa2", paddingLeft: 8 }}>
+        {title}
+      </h4>
+      {children}
+    </div>
+  );
+}
+
+function List({ rows, fmtDate, label, badgeCls }) {
+  const badgeStyle = {
+    base: {
+      display: "inline-block",
+      padding: "6px 10px",
+      borderRadius: 999,
+      fontWeight: 800,
+      fontSize: 12,
+      border: "1px solid",
+      background: "#fff",
+      whiteSpace: "nowrap",
+      lineHeight: 1,
+      maxWidth: "100%",
+    },
+    red:   { color:"#b91c1c", borderColor:"#fecaca", background:"#fff1f2" },
+    amber: { color:"#b45309", borderColor:"#fcd34d", background:"#fff7ed" },
+    green: { color:"#166534", borderColor:"#bbf7d0", background:"#ecfdf5" },
+  };
+  const style = { ...badgeStyle.base, ...(badgeStyle[badgeCls] || {}) };
+
+  return (
+    // 👇 wrapper baru biar bisa scroll horizontal kalau layar sempit
+    <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+      <table
+        style={{
+          width: "100%",
+          minWidth: 720,                 // biar kolom gak kepres terlalu kecil
+          borderCollapse: "separate",
+          borderSpacing: 0,
+          border: "1px solid #ffe1ea",
+          borderRadius: 12,
+          overflow: "hidden",
+          tableLayout: "fixed"           // stabilkan lebar kolom
+        }}
+      >
+        <colgroup>
+          <col style={{ width: 56 }} />
+          <col style={{ width: 300 }} />   {/* Nama RS */}
+          <col style={{ width: 120 }} />   {/* Wilayah */}
+          <col style={{ width: 120 }} />   {/* Tgl Akhir */}
+          <col style={{ width: 160 }} />   {/* Keterangan */}
+        </colgroup>
+        <thead>
+          <tr>
+            <th style={th}>No</th>
+            <th style={th}>Nama RS</th>
+            <th style={th}>Wilayah</th>
+            <th style={th}>Tgl Akhir</th>
+            <th style={th}>Keterangan</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d, i) => (
+            <tr key={d.id || d.namaRS + i}>
+              <td style={td}>{i + 1}</td>
+              <td style={{ ...td, overflow: "hidden", textOverflow: "ellipsis" }}>{d.namaRS}</td>
+              <td style={td}>{d.wilayah}</td>
+              <td style={td}>{fmtDate(d.tglAkhir)}</td>
+              <td style={td}>
+                <span style={style}>{label(d)}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const th = {
+  background: "#fff6f9",
+  color: "#111",
+  fontWeight: 800,
+  fontSize: 14,
+  padding: "10px 12px",
+  borderBottom: "1px dashed #ffd1d6",
+  textAlign: "left",
+};
+const td = {
+  padding: "10px 12px",
+  borderBottom: "1px dashed #ffe3ea",
+};
+
 /* =========================================================
    Komponen Halaman Hero (TETAP seperti tampilanmu)
    ========================================================= */
@@ -347,6 +626,8 @@ export default function SpaHero() {
 
       {/* Chatbot mengambang */}
       <ChatbotSPA />
+      {/* 🔔 Notifikasi PKS mengambang */}
+      <NotifPKS />
     </section>
   );
 }

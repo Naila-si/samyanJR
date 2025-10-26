@@ -1,4 +1,96 @@
 import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { supabase } from "../../lib/supabaseClient";
+
+const toDateOnly = (v) => {
+  if (!v) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+  const d = new Date(v);
+  if (isNaN(d)) return null;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+async function kirimKeSupabase(formData) {
+  const slugByLabel = {
+    "Keterjaminan Korban": "keterjaminan",
+    "Keabsahan Ahli Waris": "keabsahan_waris",
+    "Keabsahan Biaya Perawatan": "keabsahan_biaya",
+    "Lainnya": "lainnya",
+  };
+  const labelBySlug = {
+    keterjaminan: "Keterjaminan Korban",
+    keabsahan_waris: "Keabsahan Ahli Waris",
+    keabsahan_biaya: "Keabsahan Biaya Perawatan",
+    lainnya: formData.jenisSurveiLainnya || "Lainnya",
+  };
+
+  const template = formData.template; // "kunjungan_rs" | "survei_ll" | "survei_md"
+  const isSurvey = template?.startsWith("survei_");
+
+  // hitung jumlah berkas sebagai ANGKA (kalau kolom 'berkas' di DB numerik)
+  const berkasCount = Array.isArray(formData.attachList)
+    ? formData.attachList.length
+    : (typeof formData.berkas === "number" ? formData.berkas : null);
+
+  // siapkan payload dasar (kolom umum)
+  const base = {
+    local_id: formData.localId || null,
+    waktu: formData.waktu ?? new Date().toISOString(), // timestamptz
+    template,
+    korban: formData.korban ?? formData.namaKorban ?? null,
+    petugas: formData.petugas ?? formData.petugasSurvei ?? null,
+    tanggalKecelakaan: toDateOnly(formData.tanggalKecelakaan ?? formData.tglKecelakaan),
+    status: formData.status ?? "terkirim",
+    rating: (formData.rating === 0 || formData.rating) ? Number(formData.rating) : null,
+    feedback: formData.feedback ?? null,
+  };
+
+  // kalau SURVEI: tambahkan field survei
+  let surveyFields = {};
+  if (isSurvey) {
+    // normalisasi jenis_survei ke slug
+    let jenisSurveiSlug = formData.jenisSurvei || null;
+    if (jenisSurveiSlug && slugByLabel[jenisSurveiSlug]) {
+      jenisSurveiSlug = slugByLabel[jenisSurveiSlug]; // kalau user kirim label
+    }
+    const allowed = ["keterjaminan", "keabsahan_waris", "keabsahan_biaya", "lainnya"];
+    if (jenisSurveiSlug && !allowed.includes(jenisSurveiSlug)) {
+      jenisSurveiSlug = "lainnya";
+    }
+
+    const jenisSurveyLabel =
+      formData.jenisSurveyLabel ??
+      (jenisSurveiSlug ? labelBySlug[jenisSurveiSlug] : null);
+
+    surveyFields = {
+      noPL: formData.noPL ?? formData.noBerkas ?? formData.noLP ?? null,
+      jenisSurvei: jenisSurveiSlug,        
+      jenisSurveyLabel: jenisSurveyLabel, 
+    };
+  }
+
+  // gabung base + surveyFields
+  const record = { ...base, ...(isSurvey ? surveyFields : {}) };
+
+  // buang undefined agar bersih
+  Object.keys(record).forEach((k) => record[k] === undefined && delete record[k]);
+
+  console.log("📤 Payload ke Supabase:", record);
+
+  // ===== INSERT =====
+  const { error } = await supabase.from("DataForm").insert([record]);
+
+  if (error) {
+    console.error("❌ Supabase insert error:", {
+      message: error.message, details: error.details, hint: error.hint, code: error.code, sent: record,
+    });
+    alert("Insert gagal. Cek console (message/details/hint) untuk kolom yang bentrok 🙏");
+  } else {
+    console.log("✅ Tersimpan di Supabase");
+  }
+}
 
 /* ============================================
    DATA
@@ -11,6 +103,182 @@ const faces = [
   { v: 5, label: "🤩", text: "Suka banget!" },
 ];
 
+function getListSafe(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object") return [parsed]; // 🔧 self-heal
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+// Cuma coba simpan, kalau gagal (quota) balikin false dan JANGAN ubah data lama
+function tryWriteWhole(key, nextArr) {
+  try {
+    localStorage.setItem(key, JSON.stringify(nextArr));
+    return true;
+  } catch (e) {
+    console.warn("Gagal setItem (kemungkinan quota):", e);
+    return false;
+  }
+}
+
+// Append-only: baca lama → push baru → tulis → kalau gagal, batalkan
+function appendRecord(key, rec) {
+  let base = [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) base = parsed;
+      else if (parsed && typeof parsed === "object") base = [parsed]; // 🔧 self-heal
+    }
+  } catch {
+    base = [];
+  }
+
+  const nextArr = [...base, rec];
+
+  try {
+    localStorage.setItem(key, JSON.stringify(nextArr));
+    return { ok: true, len: nextArr.length };
+  } catch (e) {
+    console.warn("Gagal setItem (kemungkinan quota):", e);
+    return { ok: false, len: base.length };
+  }
+}
+
+function sanitizeRecordForStorage(rec) {
+  const MAX_INLINE_LEN = 2000; // jaga-jaga: string terlalu panjang juga dipotong
+
+  const stripString = (s) => {
+    if (typeof s !== "string") return s;
+    if (s.startsWith("data:")) return undefined; // buang base64 besar
+    if (s.length > MAX_INLINE_LEN && !/^https?:\/\//.test(s)) {
+      // potong string panjang non-URL (biar gak bengkak)
+      return s.slice(0, MAX_INLINE_LEN);
+    }
+    return s;
+  };
+
+  const stripFile = (f) => {
+    if (!f) return f;
+    if (typeof f === "string") return stripString(f);
+
+    // objek file-ish
+    const {
+      dataURL,
+      file, // buang yang berat
+      preview, // kadang libs taruh thumbnail base64 di sini
+      ...rest
+    } = f;
+
+    // bersihkan properti string yang bisa menyimpan data base64
+    ["src", "url", "path"].forEach((k) => {
+      if (k in rest) rest[k] = stripString(rest[k]);
+    });
+
+    // singkatkan candidates (hapus yang "data:")
+    if (Array.isArray(rest.candidates)) {
+      rest.candidates = rest.candidates.map(stripString).filter(Boolean);
+    }
+
+    return rest;
+  };
+
+  const deep = (v) => {
+    if (!v) return v;
+    if (v instanceof File || v instanceof Blob) return undefined;
+    if (typeof v === "string") return stripString(v);
+    if (Array.isArray(v)) return v.map(deep);
+    if (typeof v === "object") {
+      const out = {};
+      for (const [k, val] of Object.entries(v)) {
+        // khusus beberapa kunci yang sering berat → pakai stripFile
+        if (["fotoSurveyList", "laporanRSList", "hasilFormFile"].includes(k)) {
+          out[k] = Array.isArray(val) ? val.map(stripFile) : stripFile(val);
+        } else if (k === "attachSurvey") {
+          if (val && typeof val === "object") {
+            const inner = {};
+            for (const [kk, vv] of Object.entries(val)) {
+              inner[kk] = Array.isArray(vv) ? vv.map(stripFile) : stripFile(vv);
+            }
+            out[k] = inner;
+          } else {
+            out[k] = val;
+          }
+        } else if (k === "attachList") {
+          // ringankan attachList
+          out[k] = Array.isArray(val)
+            ? val.map(({ name, size = 0, key, type }) => ({
+                name,
+                size,
+                key,
+                type,
+              }))
+            : undefined;
+        } else {
+          out[k] = deep(val);
+        }
+      }
+      return out;
+    }
+    return v;
+  };
+
+  return deep(rec);
+}
+
+function trySaveNoDelete(key, valueObj) {
+  try {
+    localStorage.setItem(key, JSON.stringify(valueObj));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, err: e };
+  }
+}
+
+function shrinkRecordOnce(rec) {
+  const MAX = 500; // potong string non-URL jadi 500 char
+
+  const trimStr = (s) => {
+    if (typeof s !== "string") return s;
+    if (s.startsWith("data:")) return undefined; // buang base64
+    if (!/^https?:\/\//.test(s) && s.length > MAX) return s.slice(0, MAX);
+    return s;
+  };
+
+  const walk = (v) => {
+    if (!v) return v;
+    if (v instanceof File || v instanceof Blob) return undefined;
+    if (typeof v === "string") return trimStr(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (typeof v === "object") {
+      const out = {};
+      for (const [k, val] of Object.entries(v)) {
+        // singkatkan fields umum yang sering besar
+        if (["src", "url", "path", "preview"].includes(k)) {
+          out[k] = trimStr(val);
+          continue;
+        }
+        if (k === "candidates" && Array.isArray(val)) {
+          out[k] = val.map(trimStr).filter(Boolean);
+          continue;
+        }
+        out[k] = walk(val);
+      }
+      return out;
+    }
+    return v;
+  };
+
+  return walk(rec);
+}
+
 /* ============================================
    MAIN
 ============================================ */
@@ -18,19 +286,55 @@ export default function Step5({ data = {}, setData, back, setStep }) {
   const setRating = (v) => setData?.({ ...data, rating: v });
   const [burstKey, setBurstKey] = useState(0);
 
-  const handleSubmit = useCallback(() => {
+  const showKawaiiAlert = (text, type = "success") => {
+    const msg = document.createElement("div");
+    msg.textContent = type === "success" ? `✨ ${text} 💖` : `💔 ${text} 😢`;
+
+    Object.assign(msg.style, {
+      position: "fixed",
+      bottom: "24px",
+      right: "24px",
+      background: type === "success" ? "#ffe6f1" : "#ffd6d6",
+      color: type === "success" ? "#e94e77" : "#b80000",
+      padding: "14px 20px",
+      borderRadius: "20px",
+      boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
+      fontFamily: "'Poppins', sans-serif",
+      fontWeight: "500",
+      fontSize: "15px",
+      zIndex: 9999,
+      animation: "popIn 0.4s ease",
+    });
+
+    // tambahkan ke body
+    document.body.appendChild(msg);
+
+    // otomatis hilang dalam 2.5 detik
+    setTimeout(() => {
+      msg.style.transition = "opacity 0.6s, transform 0.6s";
+      msg.style.opacity = "0";
+      msg.style.transform = "translateY(10px)";
+      setTimeout(() => msg.remove(), 600);
+    }, 2500);
+  };
+
+  const handleSubmit = useCallback(async() => {
     try {
       console.log("📦 Sebelum simpan:", localStorage.getItem("formDataList"));
 
-      // Pastikan selalu array
-      const oldData = (() => {
-        try {
-          const parsed = JSON.parse(localStorage.getItem("formDataList"));
-          return Array.isArray(parsed) ? parsed : [];
-        } catch {
-          return [];
+      try {
+        const raw0 = localStorage.getItem("formDataList");
+        if (raw0) {
+          const parsed0 = JSON.parse(raw0);
+          if (
+            parsed0 &&
+            !Array.isArray(parsed0) &&
+            typeof parsed0 === "object"
+          ) {
+            localStorage.setItem("formDataList", JSON.stringify([parsed0]));
+          }
         }
-      })();
+      } catch {}
 
       const jenisSurveiLabel = {
         keterjaminan: "Keterjaminan Korban",
@@ -39,7 +343,31 @@ export default function Step5({ data = {}, setData, back, setStep }) {
         lainnya: data.jenisSurveiLainnya || "Lainnya",
       };
 
-      const newData = {
+      const sifatStr = `${data.sifatCidera || ""} ${data.jenisSurvei || ""} ${
+        data.jenisSurveyLabel || ""
+      }`;
+
+      const hasLL = /(?:\bll\b|luka)/i.test(sifatStr);
+      const hasMD = /(?:\bmd\b|meninggal)/i.test(sifatStr);
+
+      console.log("🧩 sifatCidera:", data.sifatCidera);
+      console.log("🧩 jenisSurvei:", data.jenisSurvei);
+      console.log("🧩 jenisSurveyLabel:", data.jenisSurveyLabel);
+
+      const inferredTemplate =
+        data.template ||
+        (hasLL ? "survei_ll" : hasMD ? "survei_md" : "kunjungan_rs");
+
+      const labelBySlug = {
+        keterjaminan: "Keterjaminan Korban",
+        keabsahan_waris: "Keabsahan Ahli Waris",
+        keabsahan_biaya: "Keabsahan Biaya Perawatan",
+        lainnya: data.jenisSurveiLainnya || "Lainnya",
+      };
+      const jenisSurveiSlug   = data.jenisSurvei || null;
+      const jenisSurveyLabel  = data.jenisSurveyLabel || (jenisSurveiSlug ? labelBySlug[jenisSurveiSlug] : null);
+
+      const newDataRaw = {
         ...data,
         id: crypto.randomUUID(),
         createdAt: new Date().toISOString(),
@@ -50,27 +378,16 @@ export default function Step5({ data = {}, setData, back, setStep }) {
           hour: "2-digit",
           minute: "2-digit",
         }),
-        jenisSurvei: jenisSurveiLabel[data.jenisSurvei] || "—",
+        jenisSurvei: jenisSurveiSlug, jenisSurveyLabel,
         status: "terkirim",
+        template: inferredTemplate,
         att: data.att || {},
-        fotoSurveyList: (data.fotoSurveyList || []).map(f => ({
-          name: f.name,
-          type: f.type || "",
-        })),
-        laporanRSList: (data.laporanRSList || []).map(f => ({
-          name: f.name,
-          type: f.type || "",
-        })),
+        fotoSurveyList: data.fotoSurveyList || [],
+        laporanRSList: data.laporanRSList || [],
       };
 
       // Tambahkan hasil cetak (jika ada)
-      if (data.hasilFormFile) {
-        newData.hasilFormFile = {
-          name: data.hasilFormFile.name,
-          dataURL: data.hasilFormFile.dataURL,
-          label: data.hasilFormFile.label || "Hasil Formulir Kunjungan RS",
-        };
-      }
+      if (data.hasilFormFile) newDataRaw.hasilFormFile = data.hasilFormFile;
 
       // Merge lampiran (attach)
       const mergedAttach = {
@@ -80,102 +397,81 @@ export default function Step5({ data = {}, setData, back, setStep }) {
         hasilFormFile: data.hasilFormFile ? [data.hasilFormFile] : [],
       };
 
-      newData.attachList = Object.entries(mergedAttach)
-        .flatMap(([k, v]) =>
-          Array.isArray(v)
-            ? v.map((f) => ({
-                key: k,
-                name: f.name || k,
-                size: f.size || 0,
-              }))
-            : v
-            ? [{ key: k, name: v.name || k, size: v.size || 0 }]
-            : []
-        );
+      newDataRaw.attachSurvey = {
+        fotoSurvey: data.fotoSurveyList || [],
+        laporanRS: data.laporanRSList || [],
+        hasilFormFile: data.hasilFormFile ? [data.hasilFormFile] : [],
+      };
 
-      // Simpan dengan aman (tambah tanpa hapus lama)
-      const nextData = [...oldData, newData];
+      newDataRaw.attachList = Object.entries(mergedAttach).flatMap(([k, v]) =>
+        Array.isArray(v)
+          ? v.map((f) => ({
+              key: k,
+              name: f?.name || f?.fileName || f?.filename || k,
+              type: f?.type || f?.file?.type || undefined,
+            }))
+          : v
+          ? [{ key: k, name: v.name || k, size: v.size || 0 }]
+          : []
+      );
 
-      try {
-        localStorage.setItem(
-          "formDataList",
-          JSON.stringify(nextData, (key, value) => {
-            if (key === "dataURL" && typeof value === "string" && value.startsWith("data:"))
-              return undefined;
-            if (key === "mlResult") return undefined;
-            return value;
-          })
+      const newData = sanitizeRecordForStorage(newDataRaw);
+      const res = appendRecord("formDataList", newData);
+      if (!res.ok) {
+        alert(
+          "Penyimpanan penuh. Data lama tetap aman. Hapus beberapa entri/lampiran lalu coba lagi ya 💖"
         );
-      } catch (err) {
-        console.warn("⚠️ Storage penuh, hapus data lama & coba ulang…", err);
-        oldData.shift(); // hapus paling lama
-        localStorage.setItem("formDataList", JSON.stringify([...oldData, newData]));
+        return;
       }
 
-      // Reset form
-      setData((prev) => ({
-        ...prev,
-        petugas: "",
-        korban: "",
-        tanggalKecelakaan: "",
-        template: "",
-        sifatCidera: "",
-        jenisSurvei: "",
-        jenisSurveiLainnya: "",
-        wilayah: "",
-        lokasiKecelakaan: "",
-        rumahSakit: "",
-        tglKecelakaan: "",
-        tglMasukRS: "",
-        tglJamNotifikasi: "",
-        tglJamKunjungan: "",
-        uraianSurvei: "",
-        kesimpulanSurvei: "",
-        uraianKunjungan: "",
-        rekomendasi: "",
-        fotoSurveyList: [],
-        laporanRSList: [],
-        hasilFormFile: null,
-        rating: 0,
-        feedback: "",
-      }));
+      localStorage.setItem("formDataLastId", newData.id);
+      const now = new Date();
+      const waktuISO = now.toISOString(); 
 
-    const showKawaiiAlert = (text, type = "success") => {
-      const msg = document.createElement("div");
-      msg.textContent = type === "success"
-        ? `✨ ${text} 💖`
-        : `💔 ${text} 😢`;
-
-      Object.assign(msg.style, {
-        position: "fixed",
-        bottom: "24px",
-        right: "24px",
-        background: type === "success" ? "#ffe6f1" : "#ffd6d6",
-        color: type === "success" ? "#e94e77" : "#b80000",
-        padding: "14px 20px",
-        borderRadius: "20px",
-        boxShadow: "0 4px 10px rgba(0,0,0,0.15)",
-        fontFamily: "'Poppins', sans-serif",
-        fontWeight: "500",
-        fontSize: "15px",
-        zIndex: 9999,
-        animation: "popIn 0.4s ease",
+      await kirimKeSupabase({
+        localId: newData.id,
+        waktu: new Date().toISOString(),
+        template: inferredTemplate,              // "kunjungan_rs" / "survei_ll" / "survei_md"
+        jenisSurvei: data.jenisSurvei,           // wajib untuk survei, abaikan untuk kunjungan
+        jenisSurveyLabel: data.jenisSurveyLabel, // optional
+        noPL: data.noPL || data.noBerkas || data.noLP, // wajib untuk survei
+        korban: data.korban || data.namaKorban,
+        petugas: data.petugas || data.petugasSurvei,
+        tanggalKecelakaan: data.tanggalKecelakaan || data.tglKecelakaan,
+        attachList: newData.attachList,          // biar bisa hitung berkas
+        status: "terkirim",
+        rating: data.rating,
+        feedback: data.feedback,
       });
 
-      // tambahkan ke body
-      document.body.appendChild(msg);
+      const resetByTemplate = (tpl) =>
+        String(tpl || "").startsWith("survei_")
+          ? {
+              sifatCidera: "",
+              jenisSurvei: "",
+              jenisSurveiLainnya: "",
+              uraianSurvei: "",
+              kesimpulanSurvei: "",
+              attachSurvey: {},
+              fotoSurveyList: [],
+            }
+          : {
+              uraianKunjungan: "",
+              rekomendasi: "",
+              laporanRSList: [],
+              hasilFormFile: null,
+            };
 
-      // otomatis hilang dalam 2.5 detik
-      setTimeout(() => {
-        msg.style.transition = "opacity 0.6s, transform 0.6s";
-        msg.style.opacity = "0";
-        msg.style.transform = "translateY(10px)";
-        setTimeout(() => msg.remove(), 600);
-      }, 2500);
-    };
+      setData((prev) => ({
+        ...prev,
+        template: "",
+        rating: 0,
+        feedback: "",
+        ...resetByTemplate(inferredTemplate),
+      }));
 
       setStep(1);
-    showKawaiiAlert("Data berhasil disimpan!", "success");
+      showKawaiiAlert("Data berhasil disimpan!", "success");
     } catch (err) {
       console.error("❌ Gagal menyimpan data:", err);
       showKawaiiAlert("Gagal menyimpan data 😭", "error");
@@ -188,38 +484,69 @@ export default function Step5({ data = {}, setData, back, setStep }) {
   }, [data.rating]);
 
   const onSubmit = () => {
-    // 🩷 Pastikan user sudah isi rating
     if (!data.rating) {
       alert("Pilih rating dulu ya~ (｡•́︿•̀｡)");
       return;
     }
 
     jellyChime();
-    setBurstKey((k) => k + 1); // confetti
+    setBurstKey((k) => k + 1);
 
-    // Ambil semua data form lama
-    const existing = JSON.parse(localStorage.getItem("formDataList") || "[]");
+    // 🔒 backup mentah sebelum write-all (buat rollback kalau gagal)
+    const BK_RAW = localStorage.getItem("formDataList");
 
-    // Update data terakhir (asumsi ini step terakhir dari form yang baru dikirim)
-    if (existing.length > 0) {
-      existing[existing.length - 1] = {
-        ...existing[existing.length - 1],
-        rating: data.rating,
-        feedback: data.feedback || "",
-        updatedAt: new Date().toISOString(),
-      };
+    const existing = getListSafe("formDataList"); // self-heal: objek→array, kalau gagal parse → []
+    const targetId = localStorage.getItem("formDataLastId");
 
-      localStorage.setItem("formDataList", JSON.stringify(existing));
-    } else {
-      // fallback: kalau belum ada data sebelumnya
-      const newData = {
+    // 🛡️ Jika gagal parse (existing kosong), JANGAN overwrite array kosong.
+    if (!existing.length) {
+      console.warn(
+        "[rating] existing kosong (parse gagal?) → hindari overwrite, fallback append-only."
+      );
+      appendRecord("formDataList", {
         id: crypto.randomUUID(),
         rating: data.rating,
         feedback: data.feedback || "",
         waktu: new Date().toISOString(),
         status: "rating-only",
+      });
+
+      setTimeout(() => {
+        alert("Arigatou~ Rating & feedback terkirim! 💖");
+      }, 250);
+      return;
+    }
+
+    // cari index record yg barusan disimpan
+    let idx = existing.findIndex((x) => x && x.id === targetId);
+    if (idx < 0) idx = existing.length - 1; // fallback aman: elemen terakhir
+
+    if (idx >= 0) {
+      const next = existing.slice();
+      next[idx] = {
+        ...next[idx],
+        rating: data.rating,
+        feedback: data.feedback || "",
+        updatedAt: new Date().toISOString(),
       };
-      localStorage.setItem("formDataList", JSON.stringify([newData]));
+
+      // 📝 tulis ulang array — tapi aman: rollback kalau gagal
+      const ok = tryWriteWhole("formDataList", next);
+      if (!ok) {
+        console.warn("[rating] write-all gagal → rollback backup");
+        if (BK_RAW != null) localStorage.setItem("formDataList", BK_RAW);
+        alert("Penyimpanan penuh saat update rating. Data utama aman kok 💖");
+        return;
+      }
+    } else {
+      // benar2 tidak ketemu → append saja tanpa overwrite (non-destruktif)
+      appendRecord("formDataList", {
+        id: crypto.randomUUID(),
+        rating: data.rating,
+        feedback: data.feedback || "",
+        waktu: new Date().toISOString(),
+        status: "rating-only",
+      });
     }
 
     setTimeout(() => {
@@ -240,9 +567,12 @@ export default function Step5({ data = {}, setData, back, setStep }) {
           <span className="kw-glow">✨ Terima kasih! 🎀</span>
         </div>
         <div className="kw-hero-sub">
-          Dokumen kamu sudah kami terima. Boleh dong kasih penilaian pengalamanmu hari ini~
+          Dokumen kamu sudah kami terima. Boleh dong kasih penilaian
+          pengalamanmu hari ini~
         </div>
-        <div className="kw-mascot" aria-hidden="true">🧋</div>
+        <div className="kw-mascot" aria-hidden="true">
+          🧋
+        </div>
       </div>
 
       {/* RATING */}
@@ -260,7 +590,9 @@ export default function Step5({ data = {}, setData, back, setStep }) {
               title={f.text}
             >
               <span className="kw-emoji">{f.label}</span>
-              <span className="kw-sparkles" aria-hidden="true">✨</span>
+              <span className="kw-sparkles" aria-hidden="true">
+                ✨
+              </span>
             </button>
           ))}
         </div>
@@ -286,12 +618,18 @@ export default function Step5({ data = {}, setData, back, setStep }) {
           <span className="kw-tail" />
         </div>
 
-        <div className="kw-help">Pujian, kritik lembut, atau saran manis diterima~</div>
+        <div className="kw-help">
+          Pujian, kritik lembut, atau saran manis diterima~
+        </div>
       </div>
 
       {/* ACTIONS */}
       <div className="kw-actions">
-        <button className="kw-btn kw-btn-ghost" type="button" onClick={() => back?.()}>
+        <button
+          className="kw-btn kw-btn-ghost"
+          type="button"
+          onClick={() => back?.()}
+        >
           ⬅️ Kembali ke awal
         </button>
 
@@ -329,7 +667,9 @@ function Hearts({ value = 0 }) {
   return (
     <div className="kw-hearts" aria-hidden="true">
       {arr.map((on, i) => (
-        <span key={i} className={`h ${on ? "on" : ""}`}>💗</span>
+        <span key={i} className={`h ${on ? "on" : ""}`}>
+          💗
+        </span>
       ))}
     </div>
   );

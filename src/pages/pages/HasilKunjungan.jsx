@@ -1,5 +1,5 @@
-// src/pages/HasilKunjungan.jsx
 import React, { useMemo, useRef, useState, useEffect } from "react";
+import { fetchAllDataPks } from "../../lib/datapksRepo";
 
 /* =========================================================
    KONFIG & UTIL
@@ -232,27 +232,6 @@ export default function HasilKunjungan({
     setData?.((prev) => ({ ...prev, fotoSurveyList: updated }));
   };
 
-  // upload Laporan Hasil RS (pdf/gambar/dok apa pun)
-  // const onUploadRS = async (e) => {
-  //   const files = Array.from(e.target.files || []);
-  //   if (!files.length) return;
-  //   const out = [];
-  //   for (const f of files) {
-  //     const url = await fileToDataURL(f);
-  //     out.push({ name: f.name, dataURL: url, type: f.type || "" });
-  //   }
-  //   const newList = [...rsList, ...out];
-  //   setRsList(newList);
-  //   setData?.({ ...data, laporanRSList: newList });
-  //   e.target.value = "";
-  // };
-
-  // const removeRS = (idx) => {
-  //   const dup = [...rsList];
-  //   dup.splice(idx, 1);
-  //   setData?.({ ...data, laporanRSList: dup });
-  // };
-
   const v = {
     petugas: data.petugas || "",
     petugasJabatan: data.petugasJabatan || "Petugas Pelayanan",
@@ -296,6 +275,73 @@ export default function HasilKunjungan({
     setData?.({ ...data, pejabatMengetahuiTtd: dataURL, ttdMode: "image" });
   };
 
+  // --- RS options dari Data PKS (localStorage) ---
+  const [rsOptions, setRsOptions] = useState([]);
+
+  const LS_KEY = "datapks_rows";
+  const loadRsOptions = async () => {
+    try {
+      // 1) Coba dari localStorage dulu
+      const cached = JSON.parse(localStorage.getItem(LS_KEY) || "[]");
+      let rows = Array.isArray(cached) ? cached : [];
+
+      // 2) Kalau kosong → fetch dari Supabase (fallback)
+      if (!rows.length) {
+        try {
+          const remoteRows = Array.isArray(remote)
+            ? remote
+            : Array.isArray(remote?.data)
+              ? remote.data
+              : Array.isArray(remote?.rows)
+                ? remote.rows
+                : [];
+          if (remoteRows.length) {
+            rows = remoteRows;
+            localStorage.setItem(LS_KEY, JSON.stringify(rows));
+            try { window.dispatchEvent(new CustomEvent("datapks:changed")); } catch {}
+          } else {
+            console.warn("[HasilKunjungan] fetchAllDataPks tidak mengembalikan array. Bentuk:", remote);
+          }
+        } catch (e) {
+          console.warn("[HasilKunjungan] fallback fetchAllDataPks gagal:", e);
+        }
+      }
+
+      // 3) Bentuk list nama RS unik
+      const names = rows.map(r => {
+        const n =
+          r?.namaRS ??
+          r?.nama_rs ??
+          r?.namaRumahSakit ??
+          r?.rumahSakit ??
+          r?.rs_name ??
+          r?.rsName ??
+          "";
+        return String(n).trim();
+      }).filter(Boolean);
+
+      const seen = new Set();
+      const out = [];
+      for (const n of names) {
+        const k = n.toLowerCase();
+        if (!seen.has(k)) { seen.add(k); out.push(n); }
+      }
+      out.sort((a,b) => a.localeCompare(b, "id"));
+      setRsOptions(out);
+      console.log("[HasilKunjungan] rsOptions.count =", out.length, out.slice(0, 10));
+    } catch (e) {
+      console.error("[HasilKunjungan] loadRsOptions error:", e);
+      setRsOptions([]); 
+    }
+  };
+
+  useEffect(() => {
+    loadRsOptions();
+    const onChanged = () => loadRsOptions();
+    window.addEventListener("datapks:changed", onChanged);
+    return () => window.removeEventListener("datapks:changed", onChanged);
+  }, []);
+
   /* ============================ CETAK & DOWNLOAD ============================ */
 
   const openPrint = async () => {
@@ -320,43 +366,6 @@ export default function HasilKunjungan({
     // Cetak juga
     printViaIframe(srcdoc);
   };
-
-  // const downloadPdf = async () => {
-  //   playBeep?.();
-  //   const html2pdf = await loadHtml2Pdf();
-  //   const vv = await prepareForOutput(v);
-
-  //   // siapkan iframe, render HTML-nya di dalam
-  //   const ifr = document.createElement("iframe");
-  //   ifr.style.position = "fixed";
-  //   ifr.style.right = "0";
-  //   ifr.style.bottom = "0";
-  //   ifr.style.width = "0";
-  //   ifr.style.height = "0";
-  //   ifr.style.border = "0";
-  //   document.body.appendChild(ifr);
-  //   await new Promise((r) => {
-  //     ifr.onload = r;
-  //     ifr.srcdoc = buildBundleHtml(vv, docs);
-  //   });
-
-  //   const opt = {
-  //     margin: 10, // mm
-  //     filename: "Hasil-Kunjungan.pdf",
-  //     image: { type: "jpeg", quality: 1 },
-  //     html2canvas: {
-  //       scale: 2,
-  //       useCORS: true,
-  //       backgroundColor: "#ffffff", // anti “pink”
-  //       ignoreElements: (el) => el.classList?.contains("no-export"),
-  //     },
-  //     jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-  //     pagebreak: { mode: ["avoid-all"] },
-  //   };
-
-  //   await html2pdf().set(opt).from(ifr.contentDocument.body).save();
-  //   document.body.removeChild(ifr);
-  // };
 
   async function prepareForOutput(v0) {
     const vv = { ...v0 };
@@ -392,48 +401,7 @@ export default function HasilKunjungan({
             </span>
           </div>
         </div>
-        {/* <div className="right-controls">
-          <button className="btn ghost" onClick={() => setShowAddDoc(true)}>
-            + Tambah Dokumen
-          </button> */}
-          {/* <button className="btn ghost" onClick={downloadPdf}>
-            Download PDF
-          </button> */}
-          {/* <button className="btn ghost" onClick={openPrint}>
-            Cetak Dokumen
-          </button> */}
-        {/* </div> */}
       </div>
-
-      {/* Tambah Dokumen */}
-      {/* {showAddDoc && (
-        <div className="modal">
-          <div className="modal-card">
-            <div className="modal-hd">
-              <b>Pilih dokumen untuk ditambahkan</b>
-            </div>
-            <div className="modal-bd">
-              {DOC_OPTIONS.map((o) => (
-                <button
-                  key={o.type}
-                  className="doc-opt"
-                  onClick={() => {
-                    setDocs((d) => [...d, { type: o.type, id: Date.now() }]);
-                    setShowAddDoc(false);
-                  }}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-            <div className="modal-ft">
-              <button className="btn rose" onClick={() => setShowAddDoc(false)}>
-                Tutup
-              </button>
-            </div>
-          </div>
-        </div>
-      )} */}
 
       {/* Form utama */}
       <section className="card">
@@ -525,11 +493,15 @@ export default function HasilKunjungan({
           <div>
             <label className="label">Kode RS / Nama RS</label>
             <input
+              list="rs-master"
               className="input"
               value={v.rumahSakit}
               onChange={set("rumahSakit")}
-              placeholder="Contoh: RSUD Kota…"
+              placeholder="Ketik nama RS, pilih bila muncul…"
             />
+            <datalist id="rs-master">
+              {rsOptions.map(n => <option key={n} value={n} />)}
+            </datalist>
           </div>
 
           <div className="row-3">

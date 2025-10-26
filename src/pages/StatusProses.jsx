@@ -16,65 +16,44 @@ function AutoAudio({ src }) {
   );
 }
 
-/* ========== Data contoh (boleh ganti dari API) ========== */
-/* Tambah field: comment (komentar singkat) & missing (array kekurangan) untuk status Pending */
-const RAW_DATA = [
-  { name: "Conducting User Research", docType: "User Research and Personas", date: "2024-07-01", status: "Done",     action: "Submitted" },
-  { name: "Competitive Analysis Report", docType: "Competitive Analysis in Design", date: "2024-07-25", status: "Progress", action: "Upload" },
-  { name: "Creating Wireframes", docType: "Wireframing and Prototyping", date: "2024-08-01", status: "Progress", action: "Upload" },
-  { name: "Usability Testing and Feedback", docType: "Usability Testing and Iteration", date: "2024-08-22", status: "Pending", action: "Upload",
-    comment: "Menunggu dokumen identitas & tanda tangan formulir.",
-    missing: ["KTP (scan jelas)", "Formulir layanan (TTD pemohon)", "NPWP (opsional, jika ada)"] },
-  { name: "Developing Visual Design Elements", docType: "Visual Design and Branding", date: "2024-08-29", status: "Pending", action: "Upload",
-    comment: "Lengkapi bukti pembayaran retribusi.",
-    missing: ["Bukti pembayaran retribusi", "Surat kuasa (bila dikuasakan)"] },
-  { name: "Creating a Design System", docType: "Design Systems and Components", date: "2024-09-05", status: "Pending", action: "Upload",
-    comment: "Perlu surat pernyataan keaslian dokumen.",
-    missing: ["Surat pernyataan keaslian dokumen bermaterai"] },
-  { name: "Handoff to Development", docType: "Design to Dev Handoff", date: "2024-09-12", status: "Pending", action: "Upload",
-    comment: "Kelengkapan belum sesuai format file.",
-    missing: ["File lampiran ubah ke PDF/JPG/PNG ≤ 10MB"] },
-  { name: "Accessibility Review", docType: "WCAG Checklist", date: "2024-09-18", status: "Pending", action: "Upload",
-    comment: "Mohon unggah checklist WCAG terbaru.",
-    missing: ["Checklist WCAG (template terbaru)"] },
-  { name: "Microcopy Review", docType: "Content & Microcopy", date: "2024-09-22", status: "Pending", action: "Upload",
-    comment: "Perlu revisi redaksi pada formulir.",
-    missing: ["Formulir revisi (versi terbaru)"] },
-  { name: "Beta Feedback Summary", docType: "Feedback Summary", date: "2024-10-01", status: "Pending", action: "Upload",
-    comment: "Tambahkan lampiran foto bukti tes lapangan.",
-    missing: ["Foto dokumentasi uji coba (min. 2 file)"] },
-  { name: "Stakeholder Sign-off", docType: "Approval Doc", date: "2024-10-05", status: "Progress", action: "Upload" },
-  { name: "Final Prototype", docType: "Hi-Fi Prototype", date: "2024-10-08", status: "Progress", action: "Upload" },
-  { name: "Release Notes v1.0", docType: "Release Notes", date: "2024-10-10", status: "Pending", action: "Upload",
-    comment: "Butuh tanda tangan pejabat berwenang.",
-    missing: ["TTD pejabat berwenang", "Stempel instansi (jika diperlukan)"] },
-  { name: "Performance Test", docType: "Test Report", date: "2024-10-12", status: "Done", action: "Submitted" },
-  { name: "Security Review", docType: "Security Checklist", date: "2024-10-15", status: "Pending", action: "Upload",
-    comment: "Lampirkan checklist keamanan & hasil scan AV.",
-    missing: ["Checklist keamanan", "Hasil scan antivirus (PDF)"] },
-  { name: "Localization Pack", docType: "i18n Files", date: "2024-10-18", status: "Progress", action: "Upload" },
-  { name: "Data Migration Plan", docType: "Migration Plan", date: "2024-10-20", status: "Pending", action: "Upload",
-    comment: "Tambahkan jadwal rinci migrasi.",
-    missing: ["Timeline migrasi (Gantt/CSV)", "Dokumen fallback plan"] },
-  { name: "Rollout Plan", docType: "Rollout Strategy", date: "2024-10-22", status: "Pending", action: "Upload",
-    comment: "Perlu rencana komunikasi pengguna.",
-    missing: ["Rencana komunikasi (template)", "Draft email pengumuman"] },
-  { name: "Training Material", docType: "Docs & Video", date: "2024-10-24", status: "Progress", action: "Upload" },
-  { name: "Post-Launch Survey", docType: "Survey", date: "2024-10-26", status: "Pending", action: "Upload",
-    comment: "Mohon unggah daftar pertanyaan survei.",
-    missing: ["Daftar pertanyaan survei (PDF)"] },
-];
+const STATUS_OPTIONS = ["Semua", "Selesai", "Diproses", "Terkirim"];
 
-const STATUS_OPTIONS = ["All", "Done", "Progress", "Pending"];
+const STATUS_LABEL = {
+  selesai: "Selesai",
+  diproses: "Diproses",
+  terkirim: "Terkirim",
+};
 
-function Badge({ status }) {
+
+const STATUS_FILTERS = {
+  Semua: null,
+  Selesai: ["selesai"],
+  Diproses: ["diproses"],
+  Terkirim: ["terkirim"],
+};
+
+function Badge({ status = "Terkirim" }) {
   return (
-    <span className={`badge badge-${status.toLowerCase()}`}>
+    <span className={`badge badge-${(status || "").toLowerCase()}`}>
       <span className="dot" />
       {status}
     </span>
   );
 }
+
+// 1) taruh di atas komponen
+const LS_KEY = "formDataList";
+function getListSafe(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+// status internal -> label UI (Indonesia)
+const STATUS_MAP = { terkirim: "Terkirim", diproses: "Diproses", selesai: "Selesai" };
 
 /* ========== Modal sederhana ========== */
 function Modal({ open, title, children, onClose }) {
@@ -95,9 +74,18 @@ function Modal({ open, title, children, onClose }) {
   );
 }
 
+function pickValidTime(...candidates) {
+  for (const c of candidates) {
+    if (!c) continue;
+    const t = new Date(c).getTime();
+    if (Number.isFinite(t)) return t;   
+  }
+  return Date.now(); 
+}
+
 export default function StatusProses() {
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState("All");
+  const [status, setStatus] = useState("Semua");
   const [pageSize, setPageSize] = useState(10);
   const [page, setPage] = useState(1);
   const [sortByDateDesc, setSortByDateDesc] = useState(true);
@@ -106,23 +94,57 @@ export default function StatusProses() {
   const [openModal, setOpenModal] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
 
+  // 2) di dalam StatusProses()
+  const [data, setData] = useState([]);
+
+  // ambil data awal dari localStorage + dengarkan perubahan storage (biar auto-refresh)
+  useEffect(() => {
+    const pull = () => {
+      const rows = getListSafe(LS_KEY);
+      const mapped = rows.map((r) => ({
+        // ➜ sesuaikan kolom tabelmu
+        name: r.korban || r.namaKorban || r.noPL || "Tanpa Nama",
+        docType: r.template === "kunjungan_rs"
+          ? "Kunjungan RS"
+          : (r.jenisSurveyLabel || r.jenisSurvei || r.template || "-"),
+        dateMs: pickValidTime(
+          r._updatedAt,
+          r.verifiedAt,
+          r.unverifiedAt,
+          r.waktu,
+          r.createdAt
+        ),
+        status: STATUS_MAP[r.status] || "Terkirim",   // tampilkan label Indonesia
+        comment: r.unverifyNote || r.verifyNote || "",
+        action: "Upload", // kalau perlu aksi spesifik, silakan sesuaikan
+        missing: r.missing || [], // kalau ada daftar kekurangan
+      }));
+      setData(mapped);
+    };
+
+    pull();
+    const onStorage = (e) => { if (e.key === LS_KEY) pull(); };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   const filtered = useMemo(() => {
-    let rows = RAW_DATA.filter((r) => {
+    let rows = data.filter((r) => {
       const matchText =
         r.name.toLowerCase().includes(q.toLowerCase()) ||
         r.docType.toLowerCase().includes(q.toLowerCase());
-      const matchStatus = status === "All" ? true : r.status === status;
+      const matchStatus = status === "Semua" ? true : r.status === status;
       return matchText && matchStatus;
     });
 
     rows.sort((a, b) => {
-      const da = new Date(a.date).getTime();
-      const db = new Date(b.date).getTime();
+      const da = Number(a.dateMs || 0);
+      const db = Number(b.dateMs || 0);
       return sortByDateDesc ? db - da : da - db;
     });
 
     return rows;
-  }, [q, status, sortByDateDesc]);
+  }, [q, status, sortByDateDesc, data]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageSafe = Math.min(page, totalPages);
@@ -157,23 +179,23 @@ export default function StatusProses() {
         </div>
 
         <div className="filters">
-          <span className="muted">Filter by</span>
+          <span className="muted">Filter</span>
           <button
             className={`chip ${sortByDateDesc ? "active" : ""}`}
             onClick={() => setSortByDateDesc((v) => !v)}
             title="Urutkan tanggal pengajuan"
           >
-            dates
+            Tanggal
           </button>
-          {STATUS_OPTIONS.map((s) => (
-            <button
-              key={s}
-              className={`chip ${status === s ? "active" : ""}`}
-              onClick={() => { setStatus(s); setPage(1); }}
-            >
-              {s}
-            </button>
-          ))}
+
+          <select
+            value={status}
+            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+          >
+            {STATUS_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
         </div>
       </div>
 
@@ -197,14 +219,14 @@ export default function StatusProses() {
                 <td>{r.name}</td>
                 <td className="muted">{r.docType}</td>
                 <td>
-                  {new Date(r.date).toLocaleDateString("id-ID", {
+                  {new Date(r.dateMs).toLocaleDateString("id-ID", {
                     day: "2-digit", month: "long", year: "numeric",
                   })}
                 </td>
                 <td>
                   <Badge status={r.status} />
                   {/* Komentar jika Pending */}
-                  {r.status === "Pending" && r.comment && (
+                  {r.status === "Terkirim" && r.comment && (
                     <div className="pending-comment">
                       {/* ikon kecil komentar */}
                       <span className="cmt-icon">💬</span>
@@ -213,7 +235,7 @@ export default function StatusProses() {
                   )}
                 </td>
                 <td>
-                  {r.status === "Pending" ? (
+                  {r.status === "Terkirim" ? (
                     <button className="link" onClick={() => openMissing(r)}>
                       Lihat Kekurangan
                     </button>

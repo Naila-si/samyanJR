@@ -501,7 +501,7 @@ export default function Step4({ data, setData, back, next }) {
     const regexPlat = /[a-z]{1,2}\s?\d{3,4}\s?[a-z]{0,3}/i;
     const regexLokasi = /(jalan|jl.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid)/i;
     const regexKendaraan = /(motor|mobil|truk|bus|angkot|sepeda)/i;
-    const regexKronologi = /(menabrak|bertabrakan|terjatuh|terpeleset|terserempet|terlindas|terbentur|diserempet)/i;
+    const regexKronologi = /(menabrak|bertabrakan|terjatuh|terpeleset|terserempet|terlindas|terbentur|diserempet|mendadak|mengerem)/i;
     const regexKesimpulan = /(terjamin|tidak terjamin|dalam pertanggungan|disarankan)/i;
 
     const uraianCukup =
@@ -1229,6 +1229,20 @@ export default function Step4({ data, setData, back, next }) {
     return finalArray;
   }
 
+  useEffect(() => {
+    // expose ke global biar halaman lain bisa panggil
+    window.__reportPrinters = {
+      ll: () => openPrintSurveyLL(),
+      md: () => openPrintSurveyMD(),
+      rs: () => openPrint(),   // kunjungan RS
+    };
+
+    // bersihkan saat unmount
+    return () => {
+      try { delete window.__reportPrinters; } catch {}
+    };
+  }, [openPrintSurveyLL, openPrintSurveyMD, openPrint]);
+
   function surveyLLComplete(data) {
     const arr = surveyLLCompleteDetails(data);
     return Array.isArray(arr) && arr.length > 0 && arr.every((x) => String(x.status).startsWith("✅"));
@@ -1474,23 +1488,87 @@ function SummaryRow({ label, value }) {
   );
 }
 
-// 🔹 1. Siapkan data untuk output
-async function prepareForOutput(data) {
-  // copy agar tidak ubah state asli
-  const vv = { ...data };
+async function prepareForOutput(rec) {
+  const vv = { ...rec };
 
-  // pastikan daftar foto ada
-  vv.allPhotos =
-    (data.fotoSurveyList?.length
-      ? data.fotoSurveyList
-      : data.attachSurvey?.fotoSurvey) || [];
+  // ========== 1) Identitas & meta ==========
+  vv.petugas        = rec.petugas || rec.petugasSurvei || "";
+  vv.petugasJabatan = rec.petugasJabatan || "";
+  vv.korban         = rec.korban || rec.namaKorban || "";
+  vv.namaKorban     = vv.korban;
+  vv.noPL           = rec.noPL || rec.no_pl || "";
+  vv.noBerkas       = rec.noBerkas || rec.no_berkas || "";
+  vv.alamatKorban   = rec.alamatKorban || "";
+  vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
+  vv.wilayah        = rec.wilayah || "";
+  vv.rumahSakit     = rec.rumahSakit || "";
 
-  // beri fallback nilai
-  vv.korban = vv.korban || "Tidak disebutkan";
-  vv.lokasiKecelakaan = vv.lokasiKecelakaan || "-";
-  vv.rumahSakit = vv.rumahSakit || "-";
-  vv.uraianKunjungan = vv.uraianKunjungan || "-";
-  vv.rekomendasi = vv.rekomendasi || "-";
+  // tanggal2
+  vv.tglKecelakaan  = rec.tglKecelakaan || rec.tanggalKecelakaan || "";
+  vv.hariTanggal    = rec.hariTanggal || rec.tanggalKecelakaan || vv.tglKecelakaan || "";
+  vv.tglMasukRS     = rec.tglMasukRS || "";
+  vv.tglJamNotifikasi = rec.tglJamNotifikasi || "";
+  vv.tglJamKunjungan  = rec.tglJamKunjungan || "";
+
+  // normalisasi jenis survei
+  const sc = (rec.sifatCidera || "").toLowerCase();
+  vv.jenisSurvei = rec.jenisSurvei || (sc.includes("md") ? "Meninggal Dunia" : sc.includes("ll") ? "Luka-luka" : "");
+
+  // hubungan AW → boolean / "-"
+  let hs = rec.hubunganSesuai;
+  if (typeof hs === "string") {
+    const s = hs.trim().toLowerCase();
+    if (["ya","y","true","1","sesuai"].includes(s)) hs = true;
+    else if (["tidak","tdk","no","n","false","0","tidak sesuai"].includes(s)) hs = false;
+  }
+  vv.hubunganSesuai = hs ?? "";
+
+  // ========== 2) Narasi untuk output ==========
+  // SURVEI: gabungkan uraian + kesimpulan; KUNJUNGAN: pakai uraianKunjungan
+  vv.uraian = (rec.uraianSurvei || rec.uraian || "")
+    + (rec.kesimpulanSurvei ? `\n\nKesimpulan: ${rec.kesimpulanSurvei}` : "");
+  if (!vv.uraian.trim() && rec.uraianKunjungan) vv.uraian = rec.uraianKunjungan;
+
+  // Khusus kunjungan
+  vv.uraianKunjungan = rec.uraianKunjungan || vv.uraian || "";
+  vv.rekomendasi     = rec.rekomendasi || "";
+
+  // ========== 3) Lampiran / Foto (samakan jadi dataURL) ==========
+  const toDataURL = (file) =>
+    new Promise((resolve) => {
+      if (!file) return resolve("");
+      if (typeof file === "string") return resolve(file); // url/dataURL string
+      if (file.dataURL) return resolve(file.dataURL);
+      if (file.url) return resolve(file.url);
+      const blob = file instanceof Blob ? file : file.file instanceof Blob ? file.file : null;
+      if (!blob) return resolve("");
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result || "");
+      reader.onerror = () => resolve("");
+      reader.readAsDataURL(blob);
+    });
+
+  // sumber kemungkinan foto
+  const fotoCandidates = []
+    .concat(rec.attachSurvey?.fotoSurvey || [])
+    .concat(rec.fotoSurveyList || []);
+
+  // normalisasi ke {name, dataURL}
+  const allPhotos = [];
+  for (const f of (Array.isArray(fotoCandidates) ? fotoCandidates : [fotoCandidates])) {
+    if (!f) continue;
+    const name =
+      f.name || f.fileName || f.filename || f.label || (typeof f === "string" ? f.split("/").pop() : "foto");
+    const src = await toDataURL(f);
+    if (!src) continue;
+    // lewati PDF di grid foto (tetap akan tampil sebagai label teks di tabel)
+    if (/\.pdf(\?|$)/i.test(name) || src.startsWith("data:application/pdf")) continue;
+    allPhotos.push({ name, dataURL: src });
+  }
+  vv.allPhotos = allPhotos;
+
+  // tetap simpan attachSurvey mentah (MD/LL butuh halaman per-lampiran)
+  vv.attachSurvey = rec.attachSurvey || {};
 
   return vv;
 }

@@ -19,40 +19,52 @@ const jenisOptions = [
   { value: "lainnya", label: "Lainnya", icon: "📝" },
 ];
 
+const toNormalizedTemplate = (templateTitle, sifatCidera) => {
+  // kalau bukan template survey → cuma kunjungan_rs atau kosong
+  if (templateTitle !== SURVEY_TEMPLATE) {
+    return templateTitle?.toLowerCase().includes("kunjungan")
+      ? "kunjungan_rs"
+      : "";
+  }
+  // template survey: ikuti MD/LL
+  if (sifatCidera === "MD") return "survei_md";
+  if (sifatCidera === "LL") return "survei_ll";
+  return ""; // belum pilih sifat
+};
+
 export default function Step2({ data: rawData = {}, setData, next, back }) {
   const [warn, setWarn] = useState("");
 
   const data = {
-    template: "",
+    templateTitle: rawData.templateTitle ?? rawData.template ?? "",   // <- untuk UI dropdown
+    template: rawData.template ?? "", 
     sifatCidera: "",
     jenisSurvei: "",
     jenisSurveiLainnya: "",
     ...rawData,
   };
-  const isSurvey = data.template === SURVEY_TEMPLATE;
+  const isSurvey = data.templateTitle === SURVEY_TEMPLATE;
 
   const canNext = useMemo(() => {
     if (!data.template) return false;
-    if (data.template === SURVEY_TEMPLATE) {
+    if (isSurvey) {
       if (!data.sifatCidera) return false;
       if (!data.jenisSurvei) return false;
       if (data.jenisSurvei === "lainnya" && !data.jenisSurveiLainnya?.trim()) return false;
     }
     return true;
-  }, [data.template, isSurvey, data.sifatCidera, data.jenisSurvei, data.jenisSurveiLainnya]);
-
+  }, [isSurvey, data.template, data.sifatCidera, data.jenisSurvei, data.jenisSurveiLainnya]);
+  
   const onTemplate = (tpl) => {
-    if (tpl !== SURVEY_TEMPLATE) {
-      setData?.({
-        ...data,
-        template: tpl,
-        sifatCidera: "",
-        jenisSurvei: "",
-        jenisSurveiLainnya: "",
-      });
-    } else {
-      setData?.({ ...data, template: tpl });
-    }
+    const next = {
+      ...data,
+      templateTitle: tpl,
+      sifatCidera: tpl === SURVEY_TEMPLATE ? data.sifatCidera : "",
+      jenisSurvei: tpl === SURVEY_TEMPLATE ? data.jenisSurvei : "",
+      jenisSurveiLainnya: tpl === SURVEY_TEMPLATE ? (data.jenisSurveiLainnya || "") : "",
+    };
+    next.template = toNormalizedTemplate(tpl, next.sifatCidera);
+    setData?.(next);
     setWarn("");
   };
 
@@ -78,6 +90,11 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
       }
     }
 
+    const normalized = toNormalizedTemplate(data.templateTitle, data.sifatCidera);
+    if (normalized !== data.template) {
+      setData?.({ ...data, template: normalized });
+    }
+
     // Kalau semua valid → lanjut
     setWarn("");
     next?.();
@@ -94,7 +111,7 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
         <label className="label">Pilih Template Dokumen</label>
         <select
           className="select pretty"
-          value={data.template}
+          value={data.templateTitle}
           onChange={(e) => onTemplate(e.target.value)}
         >
           {templates.map((t, i) => (
@@ -118,7 +135,12 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
                     key={o.value}
                     type="button"
                     className={`pill ${active ? "active" : ""}`}
-                    onClick={() => setData?.({ ...data, sifatCidera: o.value })}
+                    onClick={() => setData?.({
+                                    ...data,
+                                    sifatCidera: o.value,
+                                    template: toNormalizedTemplate(data.templateTitle, o.value),
+                                  })
+                    }
                     aria-pressed={active}
                     title={o.label}
                   >
@@ -184,7 +206,7 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
             <div>
               <b>Template</b>
               <div className={data.template ? "" : "muted"}>
-                {data.template || "— belum dipilih —"}
+                {data.templateTitle || "— belum dipilih —"}
               </div>
             </div>
           </li>

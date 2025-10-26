@@ -13,6 +13,7 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.2",
+    "@supabase/supabase-js": "^2.76.1",
     "framer-motion": "^12.23.21",
     "html2canvas": "^1.4.1",
     "jsbarcode": "^3.12.1",

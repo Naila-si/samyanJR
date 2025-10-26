@@ -1,0 +1,138 @@
+:root{
+  --rose:#FFD7E0; --rose-600:#F4729B;
+  --peach:#FFE7D6; --peach-600:#F59E0B;
+  --mint:#DFF7EA; --mint-600:#10B981;
+  --sky:#DFF1FF; --sky-600:#3B82F6;
+  --lilac:#EEE7FF; --lilac-600:#8B5CF6;
+  --ink:#10131A; --slate:#415066; --muted:#7C8BA1;
+  --card:#ffffff; --border:#F1F5F9; --ring:#FBCFE8;
+  --shadow: 0 12px 30px rgba(16,19,26,.06), 0 2px 8px rgba(16,19,26,.05);
+  --radius: 16px;
+}
+
+/* ——— Base / Typography ——— */
+html,body{scroll-behavior:smooth}
+body{font-family:"Nunito", system-ui, -apple-system, Segoe UI, Roboto, "Baloo 2", sans-serif;color:var(--ink);background:linear-gradient(180deg,#FFFBFF, #FFF6FA 45%, #F5FBFF)}
+
+.muted{color:var(--muted)}
+
+/* subtle animated background sparkles */
+body::before{
+  content:"";position:fixed;inset:-20vh -20vw;pointer-events:none;opacity:.25;z-index:-1;
+  background:
+    radial-gradient(18px 18px at 10% 20%, #FFE8F2 0 60%, transparent 61%),
+    radial-gradient(24px 24px at 80% 10%, #E7F4FF 0 60%, transparent 61%),
+    radial-gradient(14px 14px at 30% 80%, #EAFEF3 0 60%, transparent 61%),
+    radial-gradient(20px 20px at 65% 70%, #F1E9FF 0 60%, transparent 61%);
+  animation: drift 30s linear infinite;
+}
+@keyframes drift{0%{transform:translate3d(0,0,0)}50%{transform:translate3d(2vw,1vh,0)}100%{transform:translate3d(0,0,0)}}
+
+/* ——— Layout wrappers ——— */
+.df-wrap{max-width:1180px;margin:28px auto;padding:0 16px}
+
+/* ——— Header ——— */
+.df-head{position:relative;padding:20px 18px 14px;border-radius:var(--radius);background:linear-gradient(135deg,#FFF5FA, #EAF7FF);border:1px solid #FFE3F0;box-shadow:var(--shadow)}
+.df-title{display:flex;align-items:center;gap:10px}
+.df-title h1{margin:0;font-weight:900;letter-spacing:.2px;background:linear-gradient(180deg,#111,#444);-webkit-background-clip:text;background-clip:text;color:transparent}
+.df-spark, .df-ribbon{font-size:28px; animation: popIn .6s ease both}
+@keyframes popIn{0%{transform:scale(.6) rotate(-8deg);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1)} }
+.df-sub{margin:.25rem 0 0 42px;color:var(--slate)}
+
+/* ——— Toolbar & Search ——— */
+.df-toolbar{display:flex;align-items:center;justify-content:space-between;margin:14px 0}
+.df-search{position:relative;flex:1}
+.df-search input{width:100%;padding:14px 44px 14px 14px;border-radius:14px;border:1.5px solid var(--border);background:#fff;box-shadow:inset 0 1px 0 #fff, 0 6px 14px rgba(16,19,26,.03);transition:.25s ease}
+.df-search input:focus{outline:none;border-color:#FBCFE8;box-shadow:0 0 0 6px rgba(251,207,232,.35), 0 8px 22px rgba(16,19,26,.06);}
+.df-search .df-emoji{position:absolute;right:12px;top:50%;transform:translateY(-50%);opacity:.7}
+
+/* ——— Cards ——— */
+.df-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.form-card{padding:16px 16px 18px}
+.card-title{font-weight:900;letter-spacing:.3px}
+
+/* Grid form */
+.grid-form{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.grid-form .full{grid-column:1/-1}
+.field label{display:block;font-size:12px;font-weight:800;color:var(--muted);margin:2px 0 6px;letter-spacing:.3px}
+.field input, .field select{width:100%;padding:12px 12px;border-radius:12px;border:1.5px solid var(--border);transition:.2s ease;background:#fff}
+.field input:focus, .field select:focus{outline:none;border-color:#E9D5FF;box-shadow:0 0 0 6px rgba(233,213,255,.35)}
+
+/* Buttons */
+.btn-primary,.btn-ghost{appearance:none;border:0;border-radius:999px;padding:10px 16px;font-weight:900}
+.btn-primary{background:linear-gradient(180deg,#FFB8CC,#FF8DB2);color:#111;box-shadow:0 8px 18px rgba(244,114,155,.28), inset 0 -2px 0 rgba(0,0,0,.08);transition:transform .12s ease, filter .2s ease}
+.btn-primary:hover{transform:translateY(-1px)}
+.btn-primary:active{transform:translateY(0) scale(.98)}
+.btn-ghost{background:#fff;border:1.5px dashed #FBCFE8;color:#b91c1c}
+.btn-ghost:hover{background:#FFF7FB}
+
+/* Tiny round icon buttons */
+.df-actions{display:flex;gap:8px}
+.df-btn{width:36px;height:36px;border-radius:999px;border:1px solid var(--border);background:#fff;box-shadow:var(--shadow);display:grid;place-items:center;transition:.2s ease}
+.df-btn:hover{transform:translateY(-1px) rotate(-3deg)}
+.df-btn.df-danger{border-color:#FFE4E6}
+.df-btn.df-danger:hover{background:#FFF1F2}
+
+/* ——— Pills / badges ——— */
+.pill{display:inline-block;padding:6px 10px;border-radius:999px;border:1px solid #FDE2E8;font-weight:800;background:#fff}
+.pill.green{color:#166534;border-color:#bbf7d0;background:#ecfdf5}
+.pill.red{color:#b91c1c;border-color:#fecaca;background:#fff1f2;animation: wiggle 1.15s ease-in-out both}
+@keyframes wiggle{0%,100%{transform:rotate(0)}15%{transform:rotate(-6deg)}30%{transform:rotate(5deg)}45%{transform:rotate(-4deg)}60%{transform:rotate(3deg)}75%{transform:rotate(-2deg)}}
+
+/* ——— Table ——— */
+.table-wrap{overflow:auto}
+.nice-table{width:100%;border-collapse:separate;border-spacing:0}
+.nice-table thead th{position:sticky;top:0;background:linear-gradient(180deg,#FFF9FC,#FFF);z-index:2;border-bottom:2px solid #FFE3F0;padding:12px 10px;font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+.nice-table tbody td{padding:12px 10px;border-bottom:1px dashed #FCE7F3}
+.nice-table tbody tr:nth-child(even) td{background:rgba(255,240,246,.35)}
+.nice-table tbody tr:hover td{background:#FFF2F7}
+
+.df-empty{padding:28px;text-align:center;color:var(--muted)}
+.df-empty-emoji{font-size:34px;margin-bottom:6px}
+
+/* ——— Pagination ——— */
+.df-pager{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.df-pager-left{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.df-pager-right{display:flex;align-items:center;gap:8px}
+.df-pager-info{color:#374151}
+.df-pager-sep{margin:0 6px;color:#9CA3AF}
+.df-select{padding:6px 10px;border-radius:8px;border:1px solid #E5E7EB}
+.btn-ghost[disabled]{opacity:.45;cursor:not-allowed}
+
+/* ——— Due Modal (override styles, cuter) ——— */
+.due-overlay{backdrop-filter: blur(3px)}
+.due-modal{position:relative}
+.due-modal::after{content:"";position:absolute;inset:-2px;border-radius:18px;padding:2px;background:linear-gradient(135deg,#FFB8CC,#C7EFFF,#D9FBE7,#E3D6FF);-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;animation: rainbow 6s linear infinite}
+@keyframes rainbow{0%{filter:hue-rotate(0)}100%{filter:hue-rotate(360deg)}}
+
+.due-sec{margin:14px 0 8px;color:#b91c1c;font-weight:800;border-left:4px solid #ff9aa2;padding-left:8px}
+.due-table{width:100%;border-collapse:separate;border-spacing:0;margin-bottom:12px;border:1px solid #ffe1ea;border-radius:12px;overflow:hidden}
+.due-table thead th{background:#fff6f9;color:#111;font-weight:800;font-size:14px;padding:12px 14px;letter-spacing:.2px;border-bottom:1px dashed #ffd1d6}
+.due-table tbody td{padding:12px 14px;vertical-align:middle;border-bottom:1px dashed #ffe3ea}
+.due-table tbody tr:last-child td{border-bottom:0}
+.due-table tbody tr:nth-child(even) td{background:#fffafb}
+.due-table tbody tr:hover td{background:#fff2f6}
+.due-badge{display:inline-block;padding:6px 10px;border-radius:999px;font-weight:800;font-size:12px;line-height:1;white-space:nowrap;border:1px solid;background:#fff}
+.due-badge.red{color:#b91c1c;border-color:#fecaca;background:#fff1f2}
+.due-badge.amber{color:#b45309;border-color:#fcd34d;background:#fff7ed}
+.due-badge.green{color:#166534;border-color:#bbf7d0;background:#ecfdf5}
+
+/* ——— Cute Mascot Button ——— */
+.kawaii-mascot{position:fixed;right:18px;bottom:18px;width:58px;height:58px;border-radius:50%;border:2px solid #FFD2E1;background:radial-gradient(120% 120% at 30% 20%, #FFF 0 60%, #FFEAF2 61% 100%);box-shadow:0 14px 30px rgba(244,114,155,.25), inset 0 -3px 0 rgba(0,0,0,.07);display:grid;place-items:center;font-size:28px;cursor:pointer;transition:transform .15s ease, box-shadow .2s ease;z-index:10000}
+.kawaii-mascot:hover{transform:translateY(-3px) rotate(-6deg)}
+.kawaii-mascot .blink{animation: blink 4.2s infinite}
+@keyframes blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+.kawaii-say{position:fixed;right:88px;bottom:30px;background:#fff;border:1.5px solid #FFE1EC;padding:10px 12px;border-radius:14px;box-shadow:var(--shadow);font-weight:700}
+
+/* ——— Fun micro-interactions ——— */
+input, select, .btn-primary, .df-btn{transform:translateZ(0)}
+input:hover, select:hover{box-shadow:0 6px 16px rgba(16,19,26,.05)}
+
+/* Responsive tweaks */
+@media (max-width: 980px){
+  .grid-form{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width: 640px){
+  .grid-form{grid-template-columns:1fr}
+  .df-sub{margin-left:0}
+}

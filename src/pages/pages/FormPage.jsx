@@ -135,6 +135,11 @@ export default function FormPage() {
     const existing = JSON.parse(localStorage.getItem("formDataList") || "[]");
     const newData = {
       ...data,
+      attachSurvey: {
+        fotoSurvey: data.fotoSurveyList || [],
+        laporanRS: data.laporanRSList || [],
+        hasilFormFile: data.mlResult?.form ? [data.mlResult.form] : [],
+      },
       waktu: new Date().toLocaleString("id-ID", {
         day: "2-digit",
         month: "short",

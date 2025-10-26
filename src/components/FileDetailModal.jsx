@@ -65,6 +65,52 @@ const buildSrcFromName = (name, data) => {
   return { src: candidates[0], candidates };
 };
 
+// Buat kandidat URL dari sebuah src yang mungkin relatif
+const makeCandidatesFromSrc = (src, name, rootDataForBase) => {
+  if (!src) return null;
+
+  // abaikan jalur lokal fakepath
+  if (/^[a-zA-Z]:\\/.test(src) || src.startsWith("C:\\") || src.startsWith("\\\\")) {
+    return null;
+  }
+
+  const isAbs = /^(data:|blob:|https?:\/\/|\/)/i.test(src);
+  const out = [];
+
+  if (isAbs) {
+    // jika sudah absolut atau data/blob, tetap taruh sebagai kandidat utama
+    out.push(src);
+    // kalau dia berupa path absolut (/foo.pdf), tambahkan origin + path sebagai kandidat kedua
+    if (src.startsWith("/") && typeof window !== "undefined") {
+      out.push(new URL(src, window.location.origin).toString());
+    }
+    return out;
+  }
+
+  // relative path → kombinasikan dengan base yang kamu punya
+  const bases = [
+    rootDataForBase?.fileBaseURL,
+    rootDataForBase?.cdnBase,
+    rootDataForBase?.baseURL,
+    "/uploads",
+    "/files",
+    "/", // fallback terakhir
+  ].filter(Boolean);
+
+  for (const b of bases) {
+    if (String(b).startsWith("http")) {
+      try { out.push(new URL(src, b).toString()); } 
+      catch { out.push(`${String(b).replace(/\/+$/,"")}/${src.replace(/^\/+/,"")}`); }
+    } else {
+      out.push(`${String(b).replace(/\/+$/,"")}/${src.replace(/^\/+/,"")}`);
+    }
+  }
+
+  // kalau masih kosong, paksa tambahkan relatif dari root
+  if (!out.length) out.push(`/${src.replace(/^\/+/,"")}`);
+  return out;
+};
+
 const normalizeOne = async (f, suggestedLabel = "file", rootDataForBase) => {
   if (!f) return null;
 
@@ -73,16 +119,16 @@ const normalizeOne = async (f, suggestedLabel = "file", rootDataForBase) => {
     if (/^data:|^https?:\/\//i.test(f)) {
       return { name, type: guessTypeFromName(name), src: f, candidates: [f] };
     }
-    const guess = buildSrcFromName(f, rootDataForBase);
-    if (guess) {
-      return { name, type: guessTypeFromName(name), src: guess.src, candidates: guess.candidates };
+    const cand = makeCandidatesFromSrc(f, name, rootDataForBase);
+    if (cand?.length) {
+      return { name, type: guessTypeFromName(name), src: cand[0], candidates: cand };
     }
     return null;
   }
 
   if (f instanceof File || f instanceof Blob) {
     const name = f.name || suggestedLabel;
-    const src = await fileToDataURL(f);
+    const src = URL.createObjectURL(f);
     return { name, type: f.type || guessTypeFromName(name), src, candidates: [src] };
   }
 
@@ -90,9 +136,9 @@ const normalizeOne = async (f, suggestedLabel = "file", rootDataForBase) => {
   const type = f.type || guessTypeFromName(name);
 
   if (f.dataURL) return { name, type, src: f.dataURL, candidates: [f.dataURL] };
-  if (f.url)     return { name, type, src: f.url, candidates: [f.url] };
-  if (f.src)     return { name, type, src: f.src, candidates: [f.src] };
-  if (f.path)    return { name, type, src: f.path, candidates: [f.path] };
+  if (f.url)     { const cand = makeCandidatesFromSrc(f.url, name, rootDataForBase); if (cand?.length) return { name, type, src: cand[0], candidates: cand }; }
+  if (f.src)     { const cand = makeCandidatesFromSrc(f.src, name, rootDataForBase); if (cand?.length) return { name, type, src: cand[0], candidates: cand }; }
+  if (f.path)    { const cand = makeCandidatesFromSrc(f.path, name, rootDataForBase); if (cand?.length) return { name, type, src: cand[0], candidates: cand }; }
 
   if (f.file instanceof File || f.file instanceof Blob) {
     const src = await fileToDataURL(f.file);
@@ -316,38 +362,45 @@ const ImageTile = ({ item, onView, onDownload }) => {
     </div>
   );
 };
-const DocTile = ({ item, onView, onDownload }) => (
-  <div
-    style={{
-      border: "1px solid #ddd",
-      borderRadius: "0.6rem",
-      padding: "0.6rem",
-      background: "#fbfbff",
-    }}
-  >
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <span style={{ fontSize: 20 }}>📄</span>
-      <div
-        style={{
-          fontSize: "0.9rem",
-          flex: 1,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-        title={item.name}
-      >
-        {item.name || "Dokumen"}
+const DocTile = ({ item, onView, onDownload }) => {
+  const [idx, setIdx] = useState(0);
+  const candidates = Array.isArray(item.candidates) && item.candidates.length ? item.candidates : [item.src];
+  const src = candidates[idx] || item.src;
+
+  const tryOpen = () => {
+    if (!src) return;
+    // bukaan tab baru seperti sebelumnya
+    const w = window.open();
+    if (w) w.location.href = src;
+  };
+
+  const tryNext = () => {
+    if (idx < candidates.length - 1) setIdx(idx + 1);
+  };
+
+  return (
+    <div style={{ border:"1px solid #ddd", borderRadius:"0.6rem", padding:"0.6rem", background:"#fbfbff" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <span style={{ fontSize:20 }}>{ isPDF(item) ? "📄" : "📦" }</span>
+        <div style={{ fontSize:"0.9rem", flex:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }} title={item.name}>
+          {item.name || "Dokumen"}
+        </div>
       </div>
+      <div style={{ display:"flex", gap:6, marginTop:8, flexWrap:"wrap" }}>
+        <button onClick={tryOpen}>👁️ Lihat</button>
+        <button onClick={() => onDownload(src, item.name || "dokumen")}>⬇️ Unduh</button>
+        {candidates.length > 1 && idx < candidates.length - 1 && (
+          <button onClick={tryNext} title="Coba jalur alternatif">🔁 Coba Link Lain</button>
+        )}
+      </div>
+      {candidates.length > 1 && (
+        <div style={{ marginTop:6, fontSize:12, color:"#666" }}>
+          Sumber #{idx+1}/{candidates.length}
+        </div>
+      )}
     </div>
-    <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-      <button onClick={() => onView(item.src)}>👁️ Lihat</button>
-      <button onClick={() => onDownload(item.src, item.name || "dokumen")}>
-        ⬇️ Unduh
-      </button>
-    </div>
-  </div>
-);
+  );
+};
 
 function SectionList({ label, raw, rootData }) {
   const [items, setItems] = useState([]);
@@ -363,8 +416,21 @@ function SectionList({ label, raw, rootData }) {
     );
   }
 
-  const onView = (src) => { if (!src) return; const w = window.open(); if (w) w.location.href = src; };
-  const onDownload = (src, name="file") => { if (!src) return; const a = document.createElement("a"); a.href = src; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
+  const isBad = (u) => !u || /^[a-zA-Z]:\\/.test(u); // cegah C:\fakepath\...
+  const onView = (src) => {
+    if (isBad(src)) return;
+    const w = window.open();
+    if (w) w.location.href = src;
+  };
+  const onDownload = (src, name="file") => {
+    if (isBad(src)) return;
+    const a = document.createElement("a");
+    a.href = src;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+ };
 
   return (
     <div style={{ marginBottom: "1rem" }}>
@@ -593,14 +659,14 @@ export default function FileDetailModal({ open, data, onClose }) {
               <SectionList key={key} label={label} raw={srcData[key]} rootData={data}/>
             ))}
 
-            {/* (Opsional) tampilkan hasilFormFile kalau ada */}
+            {/* (Opsional) tampilkan hasilFormFile kalau ada
             {!!data.hasilFormFile && (
               <SectionList
-                label="Hasil Formulir Survei (HTML)"
+                label="Hasil Formulir Survei"
                 raw={data.hasilFormFile}
                 rootData={data}
               />
-            )}
+            )} */}
           </div>
         )}
 
@@ -657,15 +723,15 @@ export default function FileDetailModal({ open, data, onClose }) {
               <p style={{ color: "#666", margin: 0 }}>Tidak ada foto</p>
             )}
 
-            {/* (Opsional) tampilkan hasilFormFile kalau ada (Kunjungan/LL juga bisa punya file HTML hasil cetak) */}
+            {/* (Opsional) tampilkan hasilFormFile kalau ada (Kunjungan/LL juga bisa punya file HTML hasil cetak)
             {!!data.hasilFormFile && (
               <div style={{ marginTop: "1rem" }}>
                 <SectionList
-                  label="Hasil Formulir (HTML)"
+                  label="Hasil Formulir"
                   raw={data.hasilFormFile}
                 />
               </div>
-            )}
+            )} */}
           </section>
         )}
 

@@ -2,19 +2,14 @@ import React, { useEffect } from "react";
 import HasilSurvey from "./HasilSurvey.jsx";
 import HasilKunjungan from "./HasilKunjungan.jsx";
 
-const SURVEY_TEMPLATE = "Laporan Hasil Survei – Ahli Waris (Versi Terbaru)";
-const KUNJUNGAN_TEMPLATE = "Lembar Hasil Kunjungan RS (Mobile Pelayanan)";
-
 export default function Step3({ data = {}, setData, next, back, playBeep }) {
-  const tpl = data.template || "";
+  const tplNorm  = data.template || "";
+  const tplTitle = data.templateTitle || "";
 
   useEffect(() => {
-      if (tpl === SURVEY_TEMPLATE) {
-        setData(prev => ({ ...prev, isSurvey: true }));
-      } else if (tpl === KUNJUNGAN_TEMPLATE) {
-        setData(prev => ({ ...prev, isSurvey: false }));
-      }
-    }, [tpl]);
+    const isSurvey = tplNorm === "survei_md" || tplNorm === "survei_ll";
+      setData?.(prev => ({ ...prev, isSurvey }));
+    }, [tplNorm]);
 
   const handleNext = () => {
     next();
@@ -22,7 +17,7 @@ export default function Step3({ data = {}, setData, next, back, playBeep }) {
 
 
   const renderBody = () => {
-    if (tpl === SURVEY_TEMPLATE) {
+    if (tplNorm === "survei_md" || tplNorm === "survei_ll") {
       return (
         <HasilSurvey
           data={data}
@@ -33,7 +28,7 @@ export default function Step3({ data = {}, setData, next, back, playBeep }) {
         />
       );
     }
-    if (tpl === KUNJUNGAN_TEMPLATE) {
+    if (tplNorm === "kunjungan_rs") {
       return (
         <HasilKunjungan
           data={data}
@@ -62,7 +57,7 @@ export default function Step3({ data = {}, setData, next, back, playBeep }) {
       <div className="head">
         <h2 className="title">
           Isi Form
-          <span className="title-sub"> {tpl || "—"} </span>
+          <span className="title-sub"> {tplTitle || "—"} </span>
         </h2>
         <span className="step-chip">Langkah 3/5</span>
       </div>
