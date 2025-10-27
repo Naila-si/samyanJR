@@ -619,9 +619,9 @@ export default function SpaHero() {
 
       <div className="hero-images">
         <img src="/foto1.jpg" alt="Pegawai 1" />
+        <img src="/foto4.jpg" alt="Pegawai 4" />
         <img src="/foto2.jpg" alt="Pegawai 2" />
         <img src="/foto3.jpg" alt="Pegawai 3" />
-        <img src="/foto4.jpg" alt="Pegawai 4" />
       </div>
 
       {/* Chatbot mengambang */}
