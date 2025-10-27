@@ -372,7 +372,7 @@ function NotifPKS() {
   }, []);
 
   const totalAlerts = groups.overdue.length + groups.h14.length + groups.h30.length;
-  if (totalAlerts === 0) return null; // nggak usah render apa-apa
+  if (totalAlerts === 0) return null; 
 
   return (
     <>
@@ -383,7 +383,7 @@ function NotifPKS() {
         style={{
           position: "fixed",
           left: 16,
-          bottom: 16 + 58, // supaya nggak tabrakan sama chatbot kalau ada
+          bottom: 16 + 58, 
           zIndex: 9998,
           border: "2px solid #fecaca",
           background: "#fff1f2",
