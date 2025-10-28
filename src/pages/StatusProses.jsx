@@ -16,20 +16,25 @@ function AutoAudio({ src }) {
   );
 }
 
-const STATUS_OPTIONS = ["Semua", "Selesai", "Diproses", "Terkirim"];
+/* ==========================================
+   KONFIGURASI STATUS & LABEL
+   ========================================== */
+const STATUS_OPTIONS = ["Semua", "Selesai", "Diproses", "Terkirim", "Ditolak"];
 
-const STATUS_LABEL = {
-  selesai: "Selesai",
-  diproses: "Diproses",
+// status internal -> label UI (Indonesia)
+const STATUS_MAP = {
   terkirim: "Terkirim",
+  diproses: "Diproses",
+  selesai: "Selesai",
+  ditolak: "Ditolak",
 };
-
 
 const STATUS_FILTERS = {
   Semua: null,
   Selesai: ["selesai"],
   Diproses: ["diproses"],
   Terkirim: ["terkirim"],
+  Ditolak: ["ditolak"], // NEW
 };
 
 function Badge({ status = "Terkirim" }) {
@@ -49,26 +54,25 @@ function getListSafe(key) {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
-// status internal -> label UI (Indonesia)
-const STATUS_MAP = { terkirim: "Terkirim", diproses: "Diproses", selesai: "Selesai" };
-
-/* ========== Modal sederhana ========== */
-function Modal({ open, title, children, onClose }) {
+/* ========== Modal sederhana serbaguna ========== */
+function Modal({ open, title, children, onClose, footer }) {
   if (!open) return null;
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
       <div className="modal-card">
         <div className="modal-header">
           <strong>{title}</strong>
-          <button className="modal-close" onClick={onClose} aria-label="Close">✕</button>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
         </div>
         <div className="modal-body">{children}</div>
-        <div className="modal-footer">
-          <button className="btn" onClick={onClose}>Tutup</button>
-        </div>
+        <div className="modal-footer">{footer ?? <button className="btn" onClick={onClose}>Tutup</button>}</div>
       </div>
     </div>
   );
@@ -78,11 +82,14 @@ function pickValidTime(...candidates) {
   for (const c of candidates) {
     if (!c) continue;
     const t = new Date(c).getTime();
-    if (Number.isFinite(t)) return t;   
+    if (Number.isFinite(t)) return t;
   }
-  return Date.now(); 
+  return Date.now();
 }
 
+/* ==========================================
+   KOMPONEN UTAMA
+   ========================================== */
 export default function StatusProses() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Semua");
@@ -91,10 +98,11 @@ export default function StatusProses() {
   const [sortByDateDesc, setSortByDateDesc] = useState(true);
 
   // modal state
-  const [openModal, setOpenModal] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState(null); // 'missing' | 'process' | 'report' | 'rejected'
   const [selectedRow, setSelectedRow] = useState(null);
 
-  // 2) di dalam StatusProses()
+  // 2) data
   const [data, setData] = useState([]);
 
   // ambil data awal dari localStorage + dengarkan perubahan storage (biar auto-refresh)
@@ -104,26 +112,32 @@ export default function StatusProses() {
       const mapped = rows.map((r) => ({
         // ➜ sesuaikan kolom tabelmu
         name: r.korban || r.namaKorban || r.noPL || "Tanpa Nama",
-        docType: r.template === "kunjungan_rs"
-          ? "Kunjungan RS"
-          : (r.jenisSurveyLabel || r.jenisSurvei || r.template || "-"),
-        dateMs: pickValidTime(
-          r._updatedAt,
-          r.verifiedAt,
-          r.unverifiedAt,
-          r.waktu,
-          r.createdAt
-        ),
-        status: STATUS_MAP[r.status] || "Terkirim",   // tampilkan label Indonesia
-        comment: r.unverifyNote || r.verifyNote || "",
-        action: "Upload", // kalau perlu aksi spesifik, silakan sesuaikan
-        missing: r.missing || [], // kalau ada daftar kekurangan
+        docType:
+          r.template === "kunjungan_rs"
+            ? "Kunjungan RS"
+            : r.jenisSurveyLabel || r.jenisSurvei || r.template || "-",
+        dateMs: pickValidTime(r._updatedAt, r.verifiedAt, r.unverifiedAt, r.waktu, r.createdAt),
+        // tampilkan label Indonesia dari status internal
+        status: STATUS_MAP[(r.status || "").toLowerCase()] || "Terkirim",
+        // catatan admin dari beragam tahap
+        notes: {
+          verifyNote: r.verifyNote || "",
+          unverifyNote: r.unverifyNote || "",
+          finishNote: r.finishNote || "",
+          rejectNote: r.rejectNote || "",
+        },
+        action: "Upload",
+        missing: r.missing || [],
+        pdfUrl: r.pdfBlobUrl || r.pdfUrl || "/Lembar_Kunjungan_RS_NAI.pdf", // fallback
+        _raw: r, // simpan raw jika perlu
       }));
       setData(mapped);
     };
 
     pull();
-    const onStorage = (e) => { if (e.key === LS_KEY) pull(); };
+    const onStorage = (e) => {
+      if (e.key === LS_KEY) pull();
+    };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
@@ -131,8 +145,7 @@ export default function StatusProses() {
   const filtered = useMemo(() => {
     let rows = data.filter((r) => {
       const matchText =
-        r.name.toLowerCase().includes(q.toLowerCase()) ||
-        r.docType.toLowerCase().includes(q.toLowerCase());
+        r.name.toLowerCase().includes(q.toLowerCase()) || r.docType.toLowerCase().includes(q.toLowerCase());
       const matchStatus = status === "Semua" ? true : r.status === status;
       return matchText && matchStatus;
     });
@@ -153,10 +166,113 @@ export default function StatusProses() {
 
   const goto = (p) => setPage(Math.min(totalPages, Math.max(1, p)));
 
-  const openMissing = (row) => {
+  // helpers buka modal sesuai mode
+  const openWith = (mode, row) => {
     setSelectedRow(row);
-    setOpenModal(true);
+    setModalMode(mode);
+    setModalOpen(true);
   };
+
+  const renderProcessContent = (row) => {
+    const { verifyNote } = row.notes || {};
+    return (
+      <>
+        <p className="muted">Catatan admin saat verifikasi:</p>
+        {verifyNote ? <p className="note">{verifyNote}</p> : <p className="muted">Tidak ada catatan.</p>}
+      </>
+    );
+  };
+
+  const renderReportContent = (row) => {
+    const { finishNote, verifyNote } = row.notes || {};
+    return (
+      <>
+        {finishNote && (
+          <>
+            <p className="muted">Catatan akhir admin:</p>
+            <p className="note">{finishNote}</p>
+          </>
+        )}
+        {verifyNote && !finishNote && (
+          <>
+            <p className="muted">Catatan admin:</p>
+            <p className="note">{verifyNote}</p>
+          </>
+        )}
+        {!finishNote && !verifyNote && <p className="muted">Tidak ada catatan admin.</p>}
+      </>
+    );
+  };
+
+  const renderMissingContent = (row) => {
+    const items = Array.isArray(row.missing) ? row.missing : [];
+    return (
+      <>
+        {items.length > 0 ? (
+          <ul className="missing-list">{items.map((m, idx) => <li key={idx}>{m}</li>)}</ul>
+        ) : (
+          <p className="muted">Tidak ada daftar kekurangan yang tercatat.</p>
+        )}
+        {row.notes?.unverifyNote && (
+          <p className="note">
+            <strong>Catatan:</strong> {row.notes.unverifyNote}
+          </p>
+        )}
+      </>
+    );
+  };
+
+  const renderRejectedContent = (row) => {
+    const items = Array.isArray(row.missing) ? row.missing : [];
+    return (
+      <>
+        <p className="muted">Pengajuan ini <b>DITOLAK</b>.</p>
+        {items.length > 0 ? (
+          <ul className="missing-list">{items.map((m, idx) => <li key={idx}>{m}</li>)}</ul>
+        ) : null}
+        {row.notes?.rejectNote ? (
+          <p className="note">
+            <strong>Alasan penolakan:</strong> {row.notes.rejectNote}
+          </p>
+        ) : (
+          <p className="muted">Tidak ada catatan penolakan yang tercatat.</p>
+        )}
+      </>
+    );
+  };
+
+  const modalTitle = selectedRow
+    ? modalMode === "process"
+      ? `Proses – ${selectedRow.name}`
+      : modalMode === "report"
+      ? `Unduh Laporan – ${selectedRow.name}`
+      : modalMode === "rejected"
+      ? `Ditolak – ${selectedRow.name}`
+      : `Kekurangan Berkas — ${selectedRow.name}`
+    : "";
+
+  const modalBody = selectedRow
+    ? modalMode === "process"
+      ? renderProcessContent(selectedRow)
+      : modalMode === "report"
+      ? renderReportContent(selectedRow)
+      : modalMode === "rejected"
+      ? renderRejectedContent(selectedRow)
+      : renderMissingContent(selectedRow)
+    : null;
+
+  const modalFooter = selectedRow ? (
+    modalMode === "report" ? (
+      <>
+        <button className="btn" onClick={() => setModalOpen(false)}>Tutup</button>
+        <a className="btn primary" href={selectedRow.pdfUrl} target="_blank" rel="noreferrer">
+          Unduh Laporan
+        </a>
+      </>
+    ) : (
+      <button className="btn" onClick={() => setModalOpen(false)}>Tutup</button>
+    )
+  ) : null;
 
   return (
     <div className="status-page">
@@ -173,7 +289,10 @@ export default function StatusProses() {
           <span className="icon">🔍</span>
           <input
             value={q}
-            onChange={(e) => { setQ(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
             placeholder="Cari nama berkas atau jenis dokumen…"
           />
         </div>
@@ -190,10 +309,15 @@ export default function StatusProses() {
 
           <select
             value={status}
-            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
+            onChange={(e) => {
+              setStatus(e.target.value);
+              setPage(1);
+            }}
           >
             {STATUS_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>{opt}</option>
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
             ))}
           </select>
         </div>
@@ -220,36 +344,46 @@ export default function StatusProses() {
                 <td className="muted">{r.docType}</td>
                 <td>
                   {new Date(r.dateMs).toLocaleDateString("id-ID", {
-                    day: "2-digit", month: "long", year: "numeric",
+                    day: "2-digit",
+                    month: "long",
+                    year: "numeric",
                   })}
                 </td>
                 <td>
                   <Badge status={r.status} />
-                  {/* Komentar jika Pending */}
-                  {r.status === "Terkirim" && r.comment && (
+                  {r.status === "Terkirim" && (r.notes?.unverifyNote || r._raw?.unverifyNote) && (
                     <div className="pending-comment">
-                      {/* ikon kecil komentar */}
                       <span className="cmt-icon">💬</span>
-                      <span>{r.comment}</span>
+                      <span>{r.notes?.unverifyNote || r._raw?.unverifyNote}</span>
                     </div>
                   )}
                 </td>
                 <td>
                   {r.status === "Terkirim" ? (
-                    <button className="link" onClick={() => openMissing(r)}>
+                    <span className="muted">-</span>
+                  ) : r.status === "Diproses" ? (
+                    <button className="link" onClick={() => openWith("process", r)}>
+                      Lihat Proses
+                    </button>
+                  ) : r.status === "Selesai" ? (
+                    <button className="link" onClick={() => openWith("report", r)}>
+                      Unduh Laporan
+                    </button>
+                  ) : r.status === "Ditolak" ? (
+                    <button className="link" onClick={() => openWith("rejected", r)}>
                       Lihat Kekurangan
                     </button>
-                  ) : r.action === "Upload" ? (
-                    <button className="link">Upload</button>
                   ) : (
-                    <span className="muted">Submitted</span>
+                    <span className="muted">-</span>
                   )}
                 </td>
               </tr>
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan="5" className="empty">Tidak ada data yang cocok.</td>
+                <td colSpan="5" className="empty">
+                  Tidak ada data yang cocok.
+                </td>
               </tr>
             )}
           </tbody>
@@ -262,58 +396,42 @@ export default function StatusProses() {
           <span>Show</span>
           <select
             value={pageSize}
-            onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
           >
-            {[10, 20, 50].map((n) => <option key={n} value={n}>{n}</option>)}
+            {[10, 20, 50].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
           </select>
           <span>Row</span>
         </div>
 
         <div className="pagination">
-          <button className="pager" onClick={() => goto(page - 1)} disabled={pageSafe === 1}>‹</button>
+          <button className="pager" onClick={() => goto(page - 1)} disabled={pageSafe === 1}>
+            ‹
+          </button>
           {Array.from({ length: totalPages }).slice(0, 7).map((_, idx) => {
             const p = idx + 1;
             return (
-              <button
-                key={p}
-                className={`pager ${p === pageSafe ? "active" : ""}`}
-                onClick={() => goto(p)}
-              >
+              <button key={p} className={`pager ${p === pageSafe ? "active" : ""}`} onClick={() => goto(p)}>
                 {p}
               </button>
             );
           })}
           {totalPages > 7 && <span className="ellipsis">…</span>}
-          <button className="pager" onClick={() => goto(page + 1)} disabled={pageSafe === totalPages}>›</button>
+          <button className="pager" onClick={() => goto(page + 1)} disabled={pageSafe === totalPages}>
+            ›
+          </button>
         </div>
       </div>
 
-      {/* Modal: daftar kekurangan */}
-      <Modal
-        open={openModal}
-        title={selectedRow ? `Kekurangan Berkas — ${selectedRow.name}` : "Kekurangan Berkas"}
-        onClose={() => setOpenModal(false)}
-      >
-        {selectedRow ? (
-          <>
-            {Array.isArray(selectedRow.missing) && selectedRow.missing.length > 0 ? (
-              <ul className="missing-list">
-                {selectedRow.missing.map((m, idx) => <li key={idx}>{m}</li>)}
-              </ul>
-            ) : (
-              <p className="muted">Tidak ada daftar kekurangan yang tercatat.</p>
-            )}
-            {selectedRow.comment && (
-              <p className="note">
-                <strong>Catatan:</strong> {selectedRow.comment}
-              </p>
-            )}
-            <div className="modal-actions">
-              <button className="btn primary">Upload Sekarang</button>
-              <button className="btn">Lihat Template</button>
-            </div>
-          </>
-        ) : null}
+      {/* Modal serbaguna */}
+      <Modal open={modalOpen} title={modalTitle} onClose={() => setModalOpen(false)} footer={modalFooter}>
+        {modalBody}
       </Modal>
     </div>
   );

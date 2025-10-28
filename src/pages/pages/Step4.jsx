@@ -81,9 +81,7 @@ export default function Step4({ data, setData, back, next }) {
   // 🖨️ Fungsi Download / Cetak HTML (versi Kunjungan RS)
   const openPrint = async () => {
     try {
-      // ✅ ambil versi bersih dari data saat ini
       const vv = await prepareForOutput(data);
-      // ✅ ambil daftar foto dari vv.allPhotos (hasil prepareForOutput)
       const fotoList = vv.allPhotos || [];
 
       // Ambil foto-foto upload (kalau ada)
@@ -102,6 +100,8 @@ export default function Step4({ data, setData, back, next }) {
       const safeName = (vv.korban || "Anon")
         .replace(/\s+/g, "_")
         .replace(/[^\w_]/g, "");
+
+      const petugasSrc = vv.petugasTtd || null;
 
       // === HTML TEMPLATE ===
       const srcdoc = `
@@ -147,6 +147,7 @@ export default function Step4({ data, setData, back, next }) {
         justify-content: space-between;
         font-size: 14px;
       }
+      .sign-img{ max-height:80px; max-width:260px; display:block; margin-top:8px; }
     </style>
     </head>
     <body>
@@ -202,7 +203,8 @@ export default function Step4({ data, setData, back, next }) {
           <i>Kepala Bagian Operasional</i>
         </div>
         <div>
-          Petugas yang melakukan kunjungan,<br/><br/><br/>
+          Petugas yang melakukan kunjungan,<br/>
+          ${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : "<br/><br/><br/>"}
           <b>${vv.petugas || "................................"}</b><br/>
           <i>${vv.petugasJabatan || ""}</i>
         </div>
@@ -699,6 +701,8 @@ export default function Step4({ data, setData, back, next }) {
       }
       const tableRows = tableRowsParts.join("");
 
+      const petugasSrc = vv.petugasTtd || null;
+
       const htmlMain = 
       `<!DOCTYPE html>
       <html>
@@ -717,6 +721,7 @@ export default function Step4({ data, setData, back, next }) {
       .lbl { margin-bottom: 10mm }
       .space { height: 28mm }
       .name { font-weight:bold; text-decoration:underline; }
+      .sign-img{ max-height:28mm; max-width:80mm; display:block; }
       </style>
       </head>
       <body>
@@ -782,7 +787,7 @@ export default function Step4({ data, setData, back, next }) {
         </div>
         <div>
           <div class="lbl">Petugas Survei,</div>
-          <div class="space"></div>
+          <div class="space">${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : ""}</div>
           <div class="name">${escapeHtml(
             vv.petugas || "........................................"
           )}</div>
@@ -966,6 +971,8 @@ export default function Step4({ data, setData, back, next }) {
           tableRowsParts.join("") ||
           '<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>';
 
+        const petugasSrc = vv.petugasTtd || null;
+
       const srcdoc = 
       `<!DOCTYPE html><html><head><meta charset="utf-8"/>
       <style>
@@ -1048,7 +1055,7 @@ export default function Step4({ data, setData, back, next }) {
         </div>
         <div>
           <div class="lbl">Petugas Survei,</div>
-          <div class="space"></div>
+          <div class="space">${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : ""}</div>
           <div class="name">${escapeHtml(
             vv.petugas || "........................................"
           )}</div>
@@ -1502,6 +1509,7 @@ async function prepareForOutput(rec) {
   vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
   vv.wilayah        = rec.wilayah || "";
   vv.rumahSakit     = rec.rumahSakit || "";
+  vv.petugasTtd = rec.petugasTtd || "";
 
   // tanggal2
   vv.tglKecelakaan  = rec.tglKecelakaan || rec.tanggalKecelakaan || "";

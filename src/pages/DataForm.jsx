@@ -55,7 +55,7 @@ async function syncVerificationToSupabase(rec, payload) {
         verified: false,
         rejected_at: toTs(payload.timestamp),
         reject_note: payload.note || null,
-        status: "terkirim",
+        status: "ditolak",
         updated_at: nowIso,
       };
       break;
@@ -232,15 +232,12 @@ function pickAlias(obj, names = []) {
 }
 
 function normalizeRemoteRow(row) {
-  // Helper: parse JSON jika disimpan sebagai string
   const parseMaybeJson = (v) => {
     if (!v) return null;
     if (typeof v === "object") return v;
     try { return JSON.parse(v); } catch { return null; }
   };
 
-  // Ada beberapa implementasi menyimpan payload penuh di 1 kolom JSON
-  // coba ambil dari 'data' / 'payload' / 'content'
   const blob =
     parseMaybeJson(row.data) ||
     parseMaybeJson(row.payload) ||
@@ -367,7 +364,6 @@ function normalizeRemoteRow(row) {
     hubunganSesuai:
       coerceAW(row.hubungan_sesuai ?? row.hubunganSesuai ?? blob.hubunganSesuai),
 
-    // narasi survei (LL/MD)
     uraian:
       row.uraian ?? blob.uraian ?? blob.uraianSurvei ?? null,
     kesimpulan:
@@ -411,6 +407,10 @@ function normalizeRemoteRow(row) {
     verifyChecklist: row.verify_checklist ?? blob.verifyChecklist ?? null,
     unverifiedAt: row.unverified_at ?? blob.unverifiedAt ?? null,
     unverifyNote: row.unverify_note ?? blob.unverifyNote ?? null,
+    rejectedAt: row.rejected_at ?? blob.rejectedAt ?? null,
+    rejectNote: row.reject_note ?? blob.rejectNote ?? null,
+    finishedAt: row.finished_at ?? blob.finishedAt ?? null,
+    finishNote: row.finish_note ?? blob.finishNote ?? null,
 
     // ===== RATING/FEEDBACK =====
     rating: row.rating ?? row.rating_value ?? blob.rating ?? blob.rating_value ?? null,
@@ -421,6 +421,11 @@ function normalizeRemoteRow(row) {
       row.updated_at ??
       row.verified_at ??
       row.unverified_at ??
+      row.updated_at ??
+      row.verified_at ??
+      row.unverified_at ??
+      row.rejected_at ??
+      row.finished_at ??
       row.waktu ??
       row.created_at ??
       null,
@@ -1338,6 +1343,10 @@ export default function DataForm() {
       verifyChecklist: prefer(remoteRow.verifyChecklist, localRow.verifyChecklist),
       unverifiedAt: prefer(remoteRow.unverifiedAt, localRow.unverifiedAt),
       unverifyNote: prefer(remoteRow.unverifyNote, localRow.unverifyNote),
+      rejectedAt: prefer(remoteRow.rejectedAt, localRow.rejectedAt),
+      rejectNote: prefer(remoteRow.rejectNote, localRow.rejectNote),
+      finishedAt: prefer(remoteRow.finishedAt, localRow.finishedAt),
+      finishNote: prefer(remoteRow.finishNote, localRow.finishNote),
 
       // rating
       rating: prefer(remoteRow.rating, localRow.rating),
@@ -2236,9 +2245,7 @@ export default function DataForm() {
             verified: false,
             rejectedAt: now,
             rejectNote: payload.note || undefined,
-            // karena filter kamu hanya punya: terkirim/diproses/selesai
-            // maka kembali ke "terkirim" (belum diproses)
-            status: "terkirim",
+            status: "ditolak",
           };
           updatedRecForSync = rec;
           return rec;
@@ -2309,6 +2316,7 @@ export default function DataForm() {
             <option value="terkirim">Terkirim</option>
             <option value="diproses">Diproses</option>
             <option value="selesai">Selesai</option>
+            <option value="ditolak">Ditolak</option>
           </select>
         </div>
       </section>
@@ -2852,8 +2860,10 @@ export default function DataForm() {
       }
 
       .df-badge.st-terkirim   { background: linear-gradient(180deg,#fff,#ffe9f3); color:#b23b76; border:1px solid var(--pink-2); }
-      .df-badge.st-diproses   { background: linear-gradient(180deg,#fff,#eafbf3); color:#0f7a4c;  border:1px solid #bfead5; }
-      .df-badge.st-selesai    { background: linear-gradient(180deg,#fff,#eef6ff); color:#1b5fb3;  border:1px solid #cfe0ff; }
+      .df-badge.st-diproses   { background: linear-gradient(180deg,#fff,#eafbf3); color:#0f7a4c; border:1px solid #bfead5; }
+      .df-badge.st-selesai    { background: linear-gradient(180deg,#fff,#eef6ff); color:#1b5fb3; border:1px solid #cfe0ff; }
+      .df-badge.st-ditolak    { background: linear-gradient(180deg,#fff,#fff4f4); color:#a30f2d; border:1px solid #f5c2c7; }
+
 
       .df-row .df-mono button{
         background: linear-gradient(180deg,#f0f8ff,#e5f4ff);

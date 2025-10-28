@@ -193,9 +193,6 @@ export default function HasilKunjungan({
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
 
-    // (Kalau kamu memang butuh ambil URL dari file pertama)
-    const url = await fileToDataURL(files[0]);
-
     const converted = await Promise.all(
       files.map(async (f) => ({
         name: f.name,
@@ -204,24 +201,13 @@ export default function HasilKunjungan({
       }))
     );
 
-    // Hindari duplikat berdasarkan nama
     setFotoList((prev) => {
-      const unique = [
-        ...prev,
-        ...converted.filter((f) => !prev.some((old) => old.name === f.name)),
-      ];
-      setData?.((d) => ({ ...d, fotoSurveyList: unique }));
-      return unique;
+      const names = new Set(prev.map((x) => x.name));
+      const merged = [...prev, ...converted.filter((x) => !names.has(x.name))];
+      setData?.((d) => ({ ...d, fotoSurveyList: merged }));
+      return merged;
     });
 
-    console.log("📸 Final fotoList:", unique);
-    console.log("🧾 File input:", files);
-
-    // ✅ Simpan sekali aja biar gak double
-    setFotoList(unique);
-    setData?.((prev) => ({ ...prev, fotoSurveyList: unique }));
-
-    // Reset input
     e.target.value = "";
   };
 
@@ -249,6 +235,7 @@ export default function HasilKunjungan({
     pejabatMengetahuiJabatan:
       data.pejabatMengetahuiJabatan || "Kepala Bagian Operasional",
     pejabatMengetahuiTtd: data.pejabatMengetahuiTtd || "",
+    petugasTtd: data.petugasTtd || "",
     ttdMode,
     fotoSurveyList: fotoList,
     laporanRSList: rsList,
@@ -264,7 +251,7 @@ export default function HasilKunjungan({
       v.tanggalKecelakaan.trim() &&
       v.tglMasukRS.trim() &&
       v.tglJamNotifikasi.trim() &&
-      v.tglJamKunjungan.trim(),
+      v.tglJamKunjungan.trim() && !!v.petugasTtd,
     [v]
   );
 
@@ -354,7 +341,7 @@ export default function HasilKunjungan({
     const url = URL.createObjectURL(blob);
 
     // Simpan ke state/form data (biar ikut ke Step5 & DataForm)
-    setV(prev => ({
+    setData?.((prev) => ({
       ...prev,
       hasilFormFile: {
         name: `Hasil_Form_Kunjungan_${vv.korban || "Anon"}.html`,
@@ -668,6 +655,30 @@ export default function HasilKunjungan({
             )}
           </div>
         </div>
+        {/* TTD PETUGAS (PNG) */}
+        <div style={{ marginTop: 14 }}>
+          <label className="label">TTD Petugas (PNG, latar transparan disarankan)</label>
+          <input
+            type="file"
+            accept="image/png"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (f.type !== "image/png") {
+                alert("Format harus PNG ya 🙏");
+                e.target.value = "";
+                return;
+              }
+              const url = await fileToDataURL(f);
+              setData?.((prev) => ({ ...prev, petugasTtd: url }));
+            }}
+          />
+          {data.petugasTtd && (
+            <div className="ttd-preview">
+              <img src={data.petugasTtd} alt="TTD Petugas" />
+            </div>
+          )}
+        </div>
       </section>
       <div className="actions">
         <button className="btn ghost" onClick={back}>
@@ -744,6 +755,7 @@ ${pages}
 
 function pageKunjungan(v) {
   const src = v.ttdMode === "image" ? v.pejabatMengetahuiTtd : null;
+  const petugasSrc = v.petugasTtd || null;
   const showImg = !!src;
   return `
 <section class="page">
@@ -767,7 +779,7 @@ function pageKunjungan(v) {
       v.rumahSakit || "-"
     )}</div>
     <div class="k">Tanggal Kecelakaan</div><div class="c">:</div><div class="v">${escapeHtml(
-      fmtDate(v.tglKecelakaan)
+      fmtDate(v.tanggalKecelakaan)
     )}</div>
     <div class="k">Tanggal Masuk RS</div><div class="c">:</div><div class="v">${escapeHtml(
       fmtDate(v.tglMasukRS)
@@ -806,7 +818,7 @@ function pageKunjungan(v) {
     </div>
     <div>
       <div class="lbl">Petugas yang Melaksanakan Kunjungan,</div>
-      <div class="space"></div>
+      <div class="space">${petugasSrc ? `<img src="${petugasSrc}" class="sign-img" />` : ""}</div>
       <div class="name">${escapeHtml(
         v.petugas || "Nama .................................................."
       )}</div>

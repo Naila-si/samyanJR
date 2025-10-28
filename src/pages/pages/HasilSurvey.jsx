@@ -247,6 +247,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         (await toDataURL(DEFAULT_TTD).catch(() => null));
     }
 
+    const petugasTtdSrc = att.petugasTtd?.url || null;
     const forPrint = { ...v, ttdSrc: ttdData || null, sumbers, sifatCidera };
     return mode === "print" ? makePrintHTML(forPrint) : makeDocHTML(forPrint);
   };
@@ -635,26 +636,29 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
             </div>
           )}
         </div>
-      </section>
-
-      {/* TTD & PEJABAT
-      <section className="card">
-        <div className="row">
-          <div>
-            <label className="label">Pejabat Mengetahui</label>
-            <div className="row">
-              <div>
-                <label className="label">Nama</label>
-                <input className="input" value={v.pejabatMengetahuiName} onChange={set("pejabatMengetahuiName")} />
-              </div>
-              <div>
-                <label className="label">Jabatan</label>
-                <input className="input" value={v.pejabatMengetahuiJabatan} onChange={set("pejabatMengetahuiJabatan")} />
-              </div>
+        <div style={{ marginTop: 10 }}>
+          <label className="label">TTD Petugas (PNG, latar transparan disarankan)</label>
+          <input
+            type="file"
+            accept="image/png"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              if (f.type !== "image/png") {
+                alert("Format harus PNG.");
+                return;
+              }
+              const url = await fileToDataURL(f);
+              setAtt({ petugasTtd: { name: f.name, file: f, url } });
+            }}
+          />
+          {att.petugasTtd?.url && (
+            <div className="ttd-preview">
+              <img src={att.petugasTtd.url} alt="TTD Petugas" />
             </div>
-          </div>
+          )}
         </div>
-      </section> */}
+      </section>
 
       {/* AKSI */}
       <div className="actions">
@@ -744,13 +748,17 @@ function makePrintHTML(v) {
   <div class="signs">
     <div>
       <div class="lbl">Mengetahui,</div>
-      <div class="space"></div>
+      <div class="space">
+        ${v.ttdSrc ? `<img class="sign-img" src="${v.ttdSrc}" />` : ""}
+      </div>
       <div class="name">${escapeHtml(v.pejabatMengetahuiName)}</div>
       <div>${escapeHtml(v.pejabatMengetahuiJabatan)}</div>
     </div>
     <div>
       <div class="lbl">Petugas Survei,</div>
-      <div class="space"></div>
+      <div class="space">
+        ${v.petugasTtdSrc ? `<img class="sign-img" src="${v.petugasTtdSrc}" />` : ""}
+      </div>
       <div class="name">${escapeHtml(v.petugasSurvei || "........................................")}</div>
     </div>
   </div>
@@ -850,7 +858,7 @@ function makeDocHTML(v) {
         <td>
           <div class="signLbl">Mengetahui,</div>
           <div class="ttdBox">
-            ${v.ttdSrc ? `<img class="ttdImg" src="${v.ttdSrc}" />` : "&nbsp;"}
+            ${v.petugasTtdSrc ? `<img class="ttdImg" src="${v.petugasTtdSrc}" />` : "&nbsp;"}
           </div>
           <div class="name">${esc(v.pejabatMengetahuiName)}</div>
           <div>${esc(v.pejabatMengetahuiJabatan)}</div>
