@@ -471,6 +471,25 @@ export default function Step5({ data = {}, setData, back, setStep }) {
       }));
 
       setStep(1);
+      setData({
+        petugas: "",
+        wilayah: "",
+        korban: "",
+        lokasiKecelakaan: "",
+        rumahSakit: "",
+        tanggalKecelakaan: "",
+        tglMasukRS: "",
+        tglJamNotifikasi: "",
+        tglJamKunjungan: "",
+        uraianKunjungan: "",
+        rekomendasi: "",
+        fotoSurveyList: [],
+        laporanRSList: [],
+        hasilFormFile: null,
+        rating: 0,
+        feedback: "",
+        template: "",
+      });
       showKawaiiAlert("Data berhasil disimpan!", "success");
     } catch (err) {
       console.error("❌ Gagal menyimpan data:", err);

@@ -16,7 +16,7 @@ const jenisOptions = [
   { value: "keterjaminan", label: "Keterjaminan Korban", icon: "🛡️" },
   { value: "keabsahan_waris", label: "Keabsahan Ahli Waris", icon: "👨‍👩‍👧‍👦" },
   { value: "keabsahan_biaya", label: "Keabsahan Biaya Perawatan", icon: "💳" },
-  { value: "lainnya", label: "Lainnya", icon: "📝" },
+  // { value: "lainnya", label: "Lainnya", icon: "📝" },
 ];
 
 const toNormalizedTemplate = (templateTitle, sifatCidera) => {
@@ -84,10 +84,10 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
         setWarn("Pilih jenis survei.");
         return;
       }
-      if (data.jenisSurvei === "lainnya" && !data.jenisSurveiLainnya?.trim()) {
-        setWarn("Isi keterangan untuk 'Lainnya'.");
-        return;
-      }
+      // if (data.jenisSurvei === "lainnya" && !data.jenisSurveiLainnya?.trim()) {
+      //   setWarn("Isi keterangan untuk 'Lainnya'.");
+      //   return;
+      // }
     }
 
     const normalized = toNormalizedTemplate(data.templateTitle, data.sifatCidera);
@@ -237,7 +237,7 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
                         ? "Keabsahan Ahli Waris"
                         : data.jenisSurvei === "keabsahan_biaya"
                         ? "Keabsahan Biaya Perawatan"
-                        : `Lainnya: ${data.jenisSurveiLainnya || "—"}`
+                        : ``
                       : "— belum dipilih —"}
                   </div>
                 </div>

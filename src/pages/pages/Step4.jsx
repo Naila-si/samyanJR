@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
+import { supabase } from "../../lib/supabaseClient";
+import { toast } from "react-hot-toast";
 import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
 
 export default function Step4({ data, setData, back, next }) {
@@ -41,10 +43,8 @@ export default function Step4({ data, setData, back, next }) {
       const jenis = data.sifatCidera?.toUpperCase();
       if (jenis === "LL" || jenis === "LUKA-LUKA") {
         setSurveyStatus(surveyLLCompleteDetails(data));
-        setMlResult({ foto: null });
       } else if (jenis === "MD" || jenis === "MENINGGAL DUNIA") {
         setSurveyStatus(surveyMDComplete(data));
-        setMlResult({ foto: null });
       }
     } else {
       const result = checkForm(data);
@@ -79,6 +79,39 @@ export default function Step4({ data, setData, back, next }) {
     );
 
   // 🖨️ Fungsi Download / Cetak HTML (versi Kunjungan RS)
+  async function saveKunjunganToSupabase(data) {
+    try {
+      const { data: inserted, error } = await supabase
+        .from("form_kunjungan_rs")
+        .insert({
+          petugas: data.petugas,
+          petugas_jabatan: "Petugas Pelayanan",
+          wilayah: data.wilayah,
+          korban: data.korban,
+          rumah_sakit: data.rumahSakit,
+          lokasi_kecelakaan: data.lokasiKecelakaan,
+          tanggal_kecelakaan: data.tanggalKecelakaan,
+          tgl_masuk_rs: data.tglMasukRS,
+          tgl_jam_notifikasi: data.tglJamNotifikasi,
+          tgl_jam_kunjungan: data.tglJamKunjungan,
+          uraian: data.uraianKunjungan,
+          rekomendasi: data.rekomendasi,
+          petugas_ttd: data.petugasTtd || null,
+          foto_survey: data.fotoSurveyList || [],
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      console.log("✅ Tersimpan ke Supabase:", inserted);
+      return inserted.id;
+    } catch (err) {
+      console.error("❌ Gagal simpan Supabase:", err);
+      toast.error("Gagal menyimpan data ke Supabase.");
+      return null;
+    }
+  }
+
   const openPrint = async () => {
     try {
       const vv = await prepareForOutput(data);
@@ -253,7 +286,7 @@ export default function Step4({ data, setData, back, next }) {
     }
   };
 
-  function checkForm(data) {
+  async function checkForm(data) {
     const result = {};
     const getVal = (v) => (typeof v === "string" ? v.trim() : v ?? "");
 
@@ -356,6 +389,15 @@ export default function Step4({ data, setData, back, next }) {
 
     console.log("✅ Hasil akhir result:", result);
     setMlResult(result);
+    setData((prev) => ({ ...prev, mlResult: result }));
+    const allValid = Object.values(result).every(v => v.startsWith("✅"));
+    if (allValid) {
+      console.log("🎉 Semua hasil valid, simpan ke Supabase...");
+      const savedId = await saveKunjunganToSupabase(data);
+      if (savedId) {
+        setData(prev => ({ ...prev, formSavedId: savedId }));
+      }
+    }
     return result;
   }
 
@@ -378,6 +420,79 @@ export default function Step4({ data, setData, back, next }) {
       images.push(canvas.toDataURL("image/png"));
     }
     return images;
+  }
+
+  async function saveSurveyToSupabase(raw) {
+    const toISODate = (d) => {
+      if (!d) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(d))) return String(d);
+      const t = new Date(d);
+      return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10);
+    };
+
+    const sifat = String(raw.sifatCidera || '').toLowerCase().includes('md') ? 'meninggal' : 'luka';
+    const jenisSurvei = typeof raw.jenisSurvei === 'string'
+      ? raw.jenisSurvei.replace('keabsahan_waris','keabsahan_ahli_waris')
+      : null;
+
+    // ⚠️ gunakan nama kolom yang terlihat di screenshot:
+    const payload = {
+      no_pl:               raw.noPL || null,
+      hari_tanggal:        toISODate(raw.hariTanggal || raw.tanggalKecelakaan) || null,
+      petugas:             raw.petugas || raw.petugasSurvei || null,
+
+      jenis_survei:        jenisSurvei,                         // text (bukan enum)
+      jenis_lainnya:       jenisSurvei ? null : (raw.jenisSurveiLainnya || null),
+
+      nama_korban:         raw.korban || raw.namaKorban || null,
+      no_berkas:           raw.noBerkas || null,
+      alamat_korban:       raw.alamatKorban || null,
+      tempat_kecelakaan:        raw.tempatKecelakaan || raw.lokasiKecelakaan || null,   // <── beda nama
+      tanggal_kecelakaan:       toISODate(raw.tanggalKecelakaan || raw.tglKecelakaan) || null, // <── beda nama
+      hubungan_sesuai:        (typeof raw.hubunganSesuai === 'boolean') ? raw.hubunganSesuai : null, // <── beda nama
+
+      sifat,               // text
+      uraian:              raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
+      kesimpulan:          raw.kesimpulanSurvei ?? null,
+
+      // kolom ini ADA & jsonb → aman dipakai
+      attachments: {
+        ktp: !!raw.attachSurvey?.ktp,
+        kk: !!raw.attachSurvey?.kk,
+        buku_tabungan: !!raw.attachSurvey?.bukuTabungan,
+        form_pengajuan_santunan: !!raw.attachSurvey?.formPengajuan,
+        form_keterangan_ahli_waris: !!raw.attachSurvey?.formKeteranganAW,
+        surat_keterangan_kematian: !!raw.attachSurvey?.skKematian,
+        akta_kelahiran: !!raw.attachSurvey?.aktaKelahiran,
+        foto_survey_count: Array.isArray(raw.fotoSurveyList)
+          ? raw.fotoSurveyList.length
+          : Array.isArray(raw.attachSurvey?.fotoSurvey)
+          ? raw.attachSurvey.fotoSurvey.length
+          : 0,
+      },
+    };
+
+    try {
+      const { data: inserted, error } = await supabase
+        .from('form_survei_aw')
+        .insert(payload, { returning: 'representation' })
+        .select()
+        .single();
+
+      if (error) throw error;
+      console.log('✅ Survei tersimpan:', inserted);
+      return inserted?.id ?? null;
+    } catch (err) {
+      const msg = [
+        err?.message,
+        err?.details && `details: ${err.details}`,
+        err?.hint && `hint: ${err.hint}`,
+        err?.code && `code: ${err.code}`,
+      ].filter(Boolean).join(' | ');
+      console.error('❌ Gagal simpan survei:', err);
+      toast.error(`Gagal menyimpan data survei. ${msg}`);
+      return null;
+    }
   }
 
   // 🖨️ Fungsi Download / Cetak HTML (Versi Survey - Meninggal Dunia)
@@ -1255,6 +1370,47 @@ export default function Step4({ data, setData, back, next }) {
     return Array.isArray(arr) && arr.length > 0 && arr.every((x) => String(x.status).startsWith("✅"));
   }
 
+  const handleKirim = async () => {
+    try {
+      if (data.isSurvey) {
+        // Untuk SURVEY gunakan dokumenOk (dokumenOkMD/LL sudah dihitung di atas)
+        if (!dokumenOk) {
+          toast.error("Lengkapi kelengkapan dokumen survei dulu ya 🙏");
+          return;
+        }
+      } else {
+        // Untuk KUNJUNGAN RS gunakan hasil ML (semuaBenar)
+        if (!semuaBenar) {
+          toast.error("Lengkapi hasil validasi Machine Learning dulu ya 🙏");
+          return;
+        }
+      }
+
+      // Simpan ke Supabase
+      const savedId = data.isSurvey
+        ? await saveSurveyToSupabase(data)      
+        : await saveKunjunganToSupabase(data);
+      if (savedId) {
+        setData((prev) => ({
+          ...prev,
+          formSavedId: savedId,
+          tersimpan: true,
+        }));
+
+        toast.success("✅ Data berhasil disimpan");
+
+        next();
+      }
+    } catch (err) {
+      console.error("❌ Error saat kirim data:", err);
+      toast.error("Gagal menyimpan data ke database.");
+    }
+  };
+
+  const disabledKirim = data.isSurvey
+   ? (String(data.sifatCidera).toUpperCase().startsWith("MD") ? !dokumenOkMD : !dokumenOkLL)
+   : !semuaBenar;
+
   // ===============================================
   // RENDER
   // ===============================================
@@ -1385,12 +1541,12 @@ export default function Step4({ data, setData, back, next }) {
             Hasil Analisis Machine Learning
           </div>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
-            <li>Foto Survey: {mlResult?.foto}</li>
-            <li>Nama Korban: {mlResult?.korban}</li>
-            <li>Lokasi: {mlResult?.lokasi}</li>
-            <li>Rumah Sakit: {mlResult?.rumahSakit}</li>
-            <li>Uraian: {mlResult?.uraian}</li>
-            <li>Rekomendasi: {mlResult?.rekomendasi}</li>
+            <li>Foto Survey: {data.mlResult?.foto}</li>
+            <li>Nama Korban: {data. mlResult?.korban}</li>
+            <li>Lokasi: {data.mlResult?.lokasi}</li>
+            <li>Rumah Sakit: {data.mlResult?.rumahSakit}</li>
+            <li>Uraian: {data.mlResult?.uraian}</li>
+            <li>Rekomendasi: {data.mlResult?.rekomendasi}</li>
           </ul>
 
           {mlResult &&
@@ -1443,23 +1599,10 @@ export default function Step4({ data, setData, back, next }) {
         <button
           className="btn rose"
           onClick={handleKirim}
-          disabled={
-            // 🔴 kalau survey dan bukan luka-luka → wajib dokumen lengkap
-            (data.isSurvey && data.sifatCidera !== "LL" && !dokumenOkMD) ||
-            // 🔴 kalau bukan survey (kunjungan RS) → wajib semua hasil ML benar
-            (!data.isSurvey && !semuaBenar)
-          }
+          disabled={disabledKirim}
           style={{
-            opacity:
-              (data.isSurvey && data.sifatCidera !== "LL" && !dokumenOkMD) ||
-              (!data.isSurvey && !semuaBenar)
-                ? 0.5
-                : 1,
-            cursor:
-              (data.isSurvey && data.sifatCidera !== "LL" && !dokumenOkMD) ||
-              (!data.isSurvey && !semuaBenar)
-                ? "not-allowed"
-                : "pointer",
+            opacity: disabledKirim ? 0.5 : 1,
+            cursor: disabledKirim ? "not-allowed" : "pointer",
           }}
         >
           Kirim
@@ -1472,14 +1615,6 @@ export default function Step4({ data, setData, back, next }) {
       </div>
     </div>
   );
-
-  function handleKirim() {
-    // if (!hasDownloadedPDF && !data.sudahDownloadPDF) {
-    //   alert("Silakan klik tombol Download PDF dulu sebelum lanjut.");
-    //   return;
-    // }
-    next();
-  }
 }
 
 // ===============================================
@@ -1509,7 +1644,16 @@ async function prepareForOutput(rec) {
   vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
   vv.wilayah        = rec.wilayah || "";
   vv.rumahSakit     = rec.rumahSakit || "";
-  vv.petugasTtd = rec.petugasTtd || "";
+  if (!vv.petugasTtd) {
+   const p = rec.attachSurvey?.petugasTtd;
+   if (p?.dataURL) vv.petugasTtd = p.dataURL;
+   else if (p?.url) vv.petugasTtd = p.url;
+   else if (p?.file instanceof Blob) {
+     vv.petugasTtd = await toDataURL(p.file);
+   } else {
+     vv.petugasTtd = rec.petugasTtd || "";
+   }
+ }
 
   // tanggal2
   vv.tglKecelakaan  = rec.tglKecelakaan || rec.tanggalKecelakaan || "";

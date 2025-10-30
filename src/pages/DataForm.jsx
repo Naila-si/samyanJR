@@ -5,9 +5,8 @@ async function syncVerificationToSupabase(rec, payload) {
   const TABLES = ["DataForm", "dataform"];
   const nowIso = new Date().toISOString();
 
-  // === coercers utk type safety ===
-  const toTs = (v) => (v ? new Date(v).toISOString() : null);           // timestamptz
-  const toDate = (v) => {                                               // date (YYYY-MM-DD)
+  const toTs = (v) => (v ? new Date(v).toISOString() : null);          
+  const toDate = (v) => {                                               
     if (!v) return null;
     const d = new Date(v);
     return isNaN(d) ? null : d.toISOString().slice(0, 10);
@@ -20,7 +19,6 @@ async function syncVerificationToSupabase(rec, payload) {
     try { return JSON.parse(v); } catch { return null; }
   };
 
-  // === build 'updates' sesuai aksi verifikasi ===
   let updates;
   switch (payload.action) {
     case "verify":
@@ -63,7 +61,6 @@ async function syncVerificationToSupabase(rec, payload) {
       updates = { updated_at: nowIso };
   }
 
-  // === (opsional) kalau kamu memang punya RPC apply_verification ===
   try {
     const { data, error } = await supabase.rpc("apply_verification", {
       p_action: payload.action,
@@ -78,7 +75,6 @@ async function syncVerificationToSupabase(rec, payload) {
     console.warn("↪️ RPC skip:", e?.message || e);
   }
 
-  // helper update & upsert
   const updateByLocalId = async (table) =>
     await supabase
       .from(table)
@@ -87,34 +83,25 @@ async function syncVerificationToSupabase(rec, payload) {
       .select("id, local_id");
 
   const upsertByLocalId = async (table) => {
-    // hitung turunan json/int agar pas dgn schema
     const counts = toJSON(rec.counts) || {};
     const files = toJSON(rec.files) || rec.files || null;
     const totalFiles =
       toInt(rec.totalFiles) ??
       (Array.isArray(rec.files) ? rec.files.length : null);
 
-    // rakit payload sesuai kolom kamu
     const row = {
-      // --- kunci sinkron ---
       local_id: String(rec.id),
-
-      // --- meta & identitas ---
-      waktu: toTs(rec.waktu || rec.createdAt || nowIso),            // timestamptz
-      template: rec.template ?? null,                                // text
-      jenisSurvei: rec.jenisSurvei ?? null,                          // text
-      jenisSurveyLabel: rec.jenisSurveyLabel ?? null,                // text
-      noPL: rec.noPL ?? null,                                        // text
-      korban: rec.korban ?? null,                                    // text
-      petugas: rec.petugas ?? null,                                  // text
-      tanggalKecelakaan: toDate(rec.tanggalKecelakaan || rec.tglKecelakaan), // date
-      status: updates.status ?? rec.status ?? "terkirim",            // text
-
-      // --- rating & feedback ---
+      waktu: toTs(rec.waktu || rec.createdAt || nowIso),            
+      template: rec.template ?? null,                                
+      jenisSurvei: rec.jenisSurvei ?? null,                          
+      jenisSurveyLabel: rec.jenisSurveyLabel ?? null,                
+      noPL: rec.noPL ?? null,                                        
+      korban: rec.korban ?? null,                                    
+      petugas: rec.petugas ?? null,                                  
+      tanggalKecelakaan: toDate(rec.tanggalKecelakaan || rec.tglKecelakaan), 
+      status: updates.status ?? rec.status ?? "terkirim",
       rating: toInt(rec.rating),
       feedback: rec.feedback ?? null,
-
-      // --- verifikasi ---
       verified: toBool(rec.verified) ?? false,
       verified_at: rec.verifiedAt ? toTs(rec.verifiedAt) : updates.verified_at ?? null,
       verify_note: rec.verifyNote ?? updates.verify_note ?? null,
@@ -125,21 +112,14 @@ async function syncVerificationToSupabase(rec, payload) {
       finish_note: rec.finishNote ?? updates.finish_note ?? null,
       rejected_at: rec.rejectedAt ? toTs(rec.rejectedAt) : updates.rejected_at ?? null,
       reject_note: rec.rejectNote ?? updates.reject_note ?? null,
-
-      // --- file-related ---
       totalFiles,
-      counts: Object.keys(counts).length ? counts : null,            // jsonb
-      files: files ?? null,                                          // jsonb
-
-      // --- housekeeping ---
-      createdAt: toTs(rec.createdAt || rec.waktu || nowIso),         // timestamptz
-      updated_at: nowIso,                                            // timestamptz
-
-      // --- kalau kamu punya ownerId (uuid) pass-kan di sini ---
-      ownerId: rec.ownerId ?? null,                                  // uuid (nullable)
+      counts: Object.keys(counts).length ? counts : null,           
+      files: files ?? null,                                         
+      createdAt: toTs(rec.createdAt || rec.waktu || nowIso),         
+      updated_at: nowIso,                                            
+      ownerId: rec.ownerId ?? null,                                  
     };
 
-    // buang key bernilai undefined (biar PostgREST gak ngambek)
     Object.keys(row).forEach((k) => row[k] === undefined && delete row[k]);
 
     return await supabase
@@ -148,14 +128,12 @@ async function syncVerificationToSupabase(rec, payload) {
       .select("id, local_id");
   };
 
-  // 1) coba UPDATE by local_id
   for (const t of TABLES) {
     const { data, error } = await updateByLocalId(t);
     if (error) { console.warn(`⚠️ Update ${t} error:`, error); continue; }
     if (data && data.length) { console.log(`✅ Update OK di ${t}`, data); return data; }
   }
 
-  // 2) jika belum ada row → UPSERT
   for (const t of TABLES) {
     const { data, error } = await upsertByLocalId(t);
     if (error) { console.warn(`⚠️ Upsert ${t} error:`, error); continue; }
@@ -182,7 +160,6 @@ function getListSafe(key) {
   }
 }
 
-// tulis ulang seluruh array tapi aman (balik false kalo gagal)
 function tryWriteWhole(key, arr) {
   try {
     localStorage.setItem(key, JSON.stringify(arr));
@@ -276,6 +253,18 @@ function normalizeRemoteRow(row) {
     row.attachments ||
     blob.attachSurvey ||
     {};
+
+  const petugasTtdVal =
+    row.petugas_ttd ??
+    row.petugasTtd ??
+    (attachSurvey && (
+      attachSurvey.petugas_ttd ??
+      attachSurvey.petugasTtd ??
+      attachSurvey.ttdPetugas ??
+      attachSurvey.signaturePetugas
+    )) ??
+    (blob && (blob.petugas_ttd ?? blob.petugasTtd)) ??
+    null;
 
   // Beberapa list foto/berkas
   const fotoSurveyList =
@@ -394,6 +383,8 @@ function normalizeRemoteRow(row) {
     rekomendasi:
       row.rekomendasi ?? blob.rekomendasi ?? null,
 
+    petugasTtd: petugasTtdVal,
+  
     // ===== LAMPIRAN =====
     attachSurvey,
     fotoSurveyList: Array.isArray(fotoSurveyList) ? fotoSurveyList : [],
@@ -1325,6 +1316,7 @@ export default function DataForm() {
       tglJamKunjungan: prefer(remoteRow.tglJamKunjungan, localRow.tglJamKunjungan),
       uraianKunjungan: prefer(remoteRow.uraianKunjungan, localRow.uraianKunjungan),
       rekomendasi: prefer(remoteRow.rekomendasi, localRow.rekomendasi),
+      petugasTtd: prefer(remoteRow.petugasTtd, localRow.petugasTtd),
 
       // narasi
       uraian: prefer(remoteRow.uraian, localRow.uraian),
@@ -1450,22 +1442,24 @@ export default function DataForm() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  const ts = (d) => {
+    if (!d) return 0;
+    const t = Date.parse(d);
+    return Number.isFinite(t) ? t : 0;
+  };
+
   const filtered = useMemo(() => {
     return rows
       .filter((r) => (templ === "all" ? true : r.template === templ))
-      .filter((r) =>
-        status === "all" ? true : (r.status || "terkirim") === status
-      )
+      .filter((r) => (status === "all" ? true : (r.status || "terkirim") === status))
       .filter((r) => {
         if (!q.trim()) return true;
-        const hay = `${r.korban || ""}|${r.petugas || ""}|${r.noPL || ""}|${
-          r.jenisSurveyLabel || ""
-        }`.toLowerCase();
+        const hay = `${r.korban || ""}|${r.petugas || ""}|${r.noPL || ""}|${r.jenisSurveyLabel || ""}`.toLowerCase();
         return hay.includes(q.toLowerCase());
       })
       .sort((a, b) => {
-        const ta = new Date(a._updatedAt || a.waktu || a.createdAt || 0).getTime();
-        const tb = new Date(b._updatedAt || b.waktu || b.createdAt || 0).getTime();
+        const ta = ts(a.waktu ?? a.createdAt);
+        const tb = ts(b.waktu ?? b.createdAt);
         return tb - ta;
       });
   }, [rows, q, templ, status]);
@@ -1850,7 +1844,6 @@ export default function DataForm() {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
-    // Kumpulkan foto dari beberapa kemungkinan field (tanpa konversi async)
     const fotoCandidates =
       (Array.isArray(vv.allPhotos) && vv.allPhotos) ||
       (Array.isArray(vv.fotoList) && vv.fotoList) ||
@@ -1887,6 +1880,17 @@ export default function DataForm() {
           .filter(Boolean)
           .join("")
       : "<i>Tidak ada foto dilampirkan.</i>";
+
+    const petugasSrc = (() => {
+      const t = vv.petugasTtd;
+      if (!t) return null;
+      if (typeof t === "string") return t;
+      if (t.dataURL) return t.dataURL;
+      if (t.url) return t.url;
+      if (t.path) return t.path;
+      if (t.file instanceof File && typeof objURL === "function") return objURL(t.file);
+      return null;
+    })();
 
     return `<!DOCTYPE html>
   <html lang="id">
@@ -1941,7 +1945,10 @@ export default function DataForm() {
         <i>Kepala Bagian Operasional</i>
       </div>
       <div>
-        Petugas yang melakukan kunjungan,<br/><br/><br/><br/>
+        Petugas yang melakukan kunjungan,<br/><br/>
+        ${petugasSrc
+          ? `<img src="${petugasSrc}" alt="TTD Petugas" style="max-height:80px; display:block; margin:4px auto;"/>`
+          : "<br/><br/><br/>"}
         <b>${escapeHtml(vv.petugas || "................................")}</b><br/>
         <i>${escapeHtml(vv.petugasJabatan || "")}</i>
       </div>
@@ -1994,6 +2001,59 @@ export default function DataForm() {
     vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
     vv.wilayah     = rec.wilayah || "";
     vv.rumahSakit  = rec.rumahSakit || "";
+
+    // 🔎 ambil container lampiran dari beberapa kemungkinan kolom
+    const att =
+      rec.attachSurvey ||
+      rec.attach_survey ||
+      rec.att ||
+      rec.attachments ||
+      {};
+
+    // helper: ambil string/obj file pertama yang valid (boleh nested/array)
+    function pickFileLike(...cands) {
+      for (const c of cands) {
+        if (!c) continue;
+        if (typeof c === "string" && c.trim()) return c;
+        if (Array.isArray(c)) {
+          const r = pickFileLike(...c);
+          if (r) return r;
+          continue;
+        }
+        if (typeof c === "object") {
+          // format umum
+          if (c.dataURL || c.url || c.path) return c;
+          // kadang di c.file (File atau objek file-like)
+          if (c.file) {
+            if (typeof c.file === "string") return c.file;
+            if (c.file.dataURL || c.file.url || c.file.path) return c.file;
+            return c.file; // biarin object, nanti builder handle via objURL
+          }
+        }
+      }
+      return "";
+    }
+
+    // kandidat key yang sering muncul
+    const fallbackTtd =
+      rec.petugasTtd ||
+      rec.petugas_ttd ||
+      att.petugasTtd ||
+      att.petugas_ttd ||
+      att.ttdPetugas ||
+      att.signaturePetugas ||
+      "";
+
+    vv.petugasTtd = fallbackTtd || "";
+
+    console.log("🧾 attachSurvey keys:", att && typeof att === "object" ? Object.keys(att) : att);
+    console.log("🖋️ Debug TTD petugas:", {
+      rec_petugasTtd: rec.petugasTtd,
+      att_petugasTtd: att.petugasTtd || att.petugas_ttd,
+      att_ttdPetugas: att.ttdPetugas || att.ttd_petugas,
+      att_signature: att.signaturePetugas || att.signature_petugas || att.signature,
+      final_vv_petugasTtd: vv.petugasTtd,
+    });
 
     // --- Tanggal-tanggal ---
     vv.tglKecelakaan =
@@ -2117,7 +2177,9 @@ export default function DataForm() {
   }
 
   const openPreview = useCallback(async (rec) => {
+    console.log("%c🔄 MOUNT DataForm", "color:#b23b76;font-weight:bold");
     if (!rec) return;
+    console.log("🚀 openPreview dipanggil dengan:", rec?.template, rec?.petugasTtd);
     const vv = await prepareForOutput(rec);
     console.log("🧩 Preview data vv:", vv);
     const template = (rec.template || "").toLowerCase();
