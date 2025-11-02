@@ -1,4 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from "react";
+import { supabase } from "../lib/supabaseClient"; // ✅ NEW: tarik dari Supabase
+// (opsional) kalau FE user juga punya auth:
+// import { useAuth } from "../auth/AuthContext";
 
 /* ========== Audio autoplay helper ========== */
 function AutoAudio({ src }) {
@@ -83,7 +86,9 @@ function Modal({ open, title, children, onClose, footer }) {
           </button>
         </div>
         <div className="modal-body">{children}</div>
-        <div className="modal-footer">{footer ?? <button className="btn" onClick={onClose}>Tutup</button>}</div>
+        <div className="modal-footer">
+          {footer ?? <button className="btn" onClick={onClose}>Tutup</button>}
+        </div>
       </div>
     </div>
   );
@@ -152,6 +157,9 @@ function ToastHost({ toasts, onClose }) {
    KOMPONEN UTAMA
    ========================================== */
 export default function StatusProses() {
+  // (opsional) kalau app user juga punya auth:
+  // const { user } = useAuth?.() ?? {};
+
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("Semua");
   const [pageSize, setPageSize] = useState(10);
@@ -174,7 +182,7 @@ export default function StatusProses() {
       const el = document.createElement("span");
       el.className = "confetti";
       el.style.left = Math.random() * 100 + "%";
-      el.style.setProperty("--tx", (Math.random() * 60 - 30) + "px");     // sway x
+      el.style.setProperty("--tx", (Math.random() * 60 - 30) + "px");
       el.style.background = ["#ff5aa5","#8bc8ff","#7be2c2","#ffd37a","#b28cff"][i % 5];
       document.body.appendChild(el);
       setTimeout(() => el.remove(), 1200);
@@ -183,50 +191,156 @@ export default function StatusProses() {
   const showToast = (message, variant = "info") => {
     const id = Math.random().toString(36).slice(2);
     setToasts((xs) => [...xs, { id, message, variant }]);
-    burstConfetti(variant);  
+    burstConfetti(variant);
     setTimeout(() => setToasts((xs) => xs.filter((x) => x.id !== id)), 2600);
   };
 
-  // ambil data awal dari localStorage + dengarkan perubahan storage (biar auto-refresh)
-  useEffect(() => {
-    const pull = () => {
-      setLoading(true);
-      const rows = getListSafe(LS_KEY);
-      const mapped = rows.map((r) => ({
-        name: r.korban || r.namaKorban || r.noPL || "Tanpa Nama",
-        docType:
-          r.template === "kunjungan_rs"
-            ? "Kunjungan RS"
-            : r.jenisSurveyLabel || r.jenisSurvei || r.template || "-",
-        dateMs: pickValidTime(r._updatedAt, r.verifiedAt, r.unverifiedAt, r.waktu, r.createdAt),
-        status: STATUS_MAP[(r.status || "").toLowerCase()] || "Terkirim",
-        notes: {
-          verifyNote: r.verifyNote || "",
-          unverifyNote: r.unverifyNote || "",
-          finishNote: r.finishNote || "",
-          rejectNote: r.rejectNote || "",
-        },
-        action: "Upload",
-        missing: r.missing || [],
-        pdfUrl: r.pdfBlobUrl || r.pdfUrl || "/Lembar_Kunjungan_RS_NAI.pdf", // fallback
-        _raw: r,
-      }));
-      setData(mapped);
-      setTimeout(() => setLoading(false), 250);
-    };
+  /* ------------------------------
+     SOURCE: Supabase (+ fallback LS)
+     ------------------------------ */
+  const mapRowFromSupabase = (r) => {
+    const ver = (r.counts && r.counts.verifikator) || {};
+    const publicPdf =
+      ver.stampedPdfUrl || r.files?.hasilFormPdf || r.files?.pdfUrl || "/Lembar_Kunjungan_RS_NAI.pdf";
 
-    pull();
+    return {
+      name: r.korban || r.namaKorban || r.noPL || "Tanpa Nama",
+      docType:
+        r.template === "kunjungan_rs"
+          ? "Kunjungan RS"
+          : r.jenisSurveyLabel || r.jenisSurvei || r.template || "-",
+      dateMs: pickValidTime(r.updated_at, r.verified_at, r.unverified_at, r.waktu, r.createdAt),
+      status: STATUS_MAP[(r.status || "").toLowerCase()] || "Terkirim",
+      notes: {
+        // baca top-level note jika ada, kalau tidak ada coba dari counts.verifikator
+        verifyNote: r.verify_note || ver.verifyNote || "",
+        unverifyNote: r.unverify_note || ver.unverifyNote || "",
+        finishNote: r.finish_note || ver.finishNote || "",
+        rejectNote: r.reject_note || ver.rejectNote || "",
+      },
+      action: "Upload",
+      missing: (r.counts && r.counts.missing) || [],
+      pdfUrl: publicPdf,
+      _raw: r,
+    };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function pullFromSupabase() {
+      try {
+        if (!supabase) throw new Error("Supabase not available");
+        setLoading(true);
+
+        let q = supabase
+          .from("DataForm")
+          .select(
+            "id, local_id, korban, template, jenisSurvei, jenisSurveyLabel, status, verified_at, unverified_at, waktu, updated_at, files, counts, verify_note, unverify_note, finish_note, reject_note"
+          )
+          .in("status", ["terkirim", "diproses", "selesai", "ditolak"])
+          .order("updated_at", { ascending: false });
+
+        // (opsional) jika ada kolom pemilik + user:
+        // if (user?.id) q = q.eq("created_by", user.id);
+
+        const { data: rows, error } = await q;
+        if (error) throw error;
+
+        const mapped = (rows || []).map(mapRowFromSupabase);
+        if (!cancelled) {
+          setData(mapped);
+          setLoading(false);
+          // simpan ke localStorage utk offline
+          try { localStorage.setItem(LS_KEY, JSON.stringify(rows || [])); } catch {}
+        }
+      } catch {
+        if (!cancelled) {
+          // fallback ke localStorage
+          const rows = getListSafe(LS_KEY);
+          const mapped = rows.map((r) => ({
+            name: r.korban || r.namaKorban || r.noPL || "Tanpa Nama",
+            docType:
+              r.template === "kunjungan_rs"
+                ? "Kunjungan RS"
+                : r.jenisSurveyLabel || r.jenisSurvei || r.template || "-",
+            dateMs: pickValidTime(r._updatedAt, r.verifiedAt, r.unverifiedAt, r.waktu, r.createdAt),
+            status: STATUS_MAP[(r.status || "").toLowerCase()] || "Terkirim",
+            notes: {
+              verifyNote: r.verifyNote || "",
+              unverifyNote: r.unverifyNote || "",
+              finishNote: r.finishNote || "",
+              rejectNote: r.rejectNote || "",
+            },
+            action: "Upload",
+            missing: r.missing || [],
+            pdfUrl: r.pdfBlobUrl || r.pdfUrl || "/Lembar_Kunjungan_RS_NAI.pdf",
+            _raw: r,
+          }));
+          setData(mapped);
+          setLoading(false);
+        }
+      }
+    }
+
+    pullFromSupabase();
+
+    // Dengarkan perubahan localStorage (fallback)
     const onStorage = (e) => {
-      if (e.key === LS_KEY) pull();
+      if (e.key === LS_KEY) {
+        const rows = getListSafe(LS_KEY);
+        const mapped = rows.map((r) => ({
+          name: r.korban || r.namaKorban || r.noPL || "Tanpa Nama",
+          docType:
+            r.template === "kunjungan_rs"
+              ? "Kunjungan RS"
+              : r.jenisSurveyLabel || r.jenisSurvei || r.template || "-",
+          dateMs: pickValidTime(r._updatedAt, r.verifiedAt, r.unverifiedAt, r.waktu, r.createdAt),
+          status: STATUS_MAP[(r.status || "").toLowerCase()] || "Terkirim",
+          notes: {
+            verifyNote: r.verifyNote || "",
+            unverifyNote: r.unverifyNote || "",
+            finishNote: r.finishNote || "",
+            rejectNote: r.rejectNote || "",
+          },
+          action: "Upload",
+          missing: r.missing || [],
+          pdfUrl: r.pdfBlobUrl || r.pdfUrl || "/Lembar_Kunjungan_RS_NAI.pdf",
+          _raw: r,
+        }));
+        setData(mapped);
+      }
     };
     window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
 
+    // Realtime Supabase: auto-refresh saat ada perubahan
+    let ch;
+    try {
+      ch = supabase
+        .channel("status_proses_user")
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table: "DataForm" },
+          () => { pullFromSupabase(); }
+        )
+        .subscribe();
+    } catch {}
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("storage", onStorage);
+      try { ch && supabase.removeChannel(ch); } catch {}
+    };
+  }, []); // kalau pakai auth: [user?.id]
+
+  /* ------------------------------
+     FILTERING / PAGINATION
+     ------------------------------ */
   const filtered = useMemo(() => {
     let rows = data.filter((r) => {
       const matchText =
-        r.name.toLowerCase().includes(q.toLowerCase()) || r.docType.toLowerCase().includes(q.toLowerCase());
+        r.name.toLowerCase().includes(q.toLowerCase()) ||
+        r.docType.toLowerCase().includes(q.toLowerCase());
       const matchStatus = status === "Semua" ? true : r.status === status;
       return matchText && matchStatus;
     });
@@ -253,17 +367,17 @@ export default function StatusProses() {
     setModalOpen(true);
   };
 
-    const summaries = useMemo(() => {
-      const c = { terkirim: 0, diproses: 0, selesai: 0, ditolak: 0 };
-      for (const r of data) {
-        const s = (r.status || "").toLowerCase();
-        if (s === "terkirim") c.terkirim++;
-        else if (s === "diproses") c.diproses++;
-        else if (s === "selesai") c.selesai++;
-        else if (s === "ditolak") c.ditolak++;
-      }
-      return c;
-    }, [data]);
+  const summaries = useMemo(() => {
+    const c = { terkirim: 0, diproses: 0, selesai: 0, ditolak: 0 };
+    for (const r of data) {
+      const s = (r.status || "").toLowerCase();
+      if (s === "terkirim") c.terkirim++;
+      else if (s === "diproses") c.diproses++;
+      else if (s === "selesai") c.selesai++;
+      else if (s === "ditolak") c.ditolak++;
+    }
+    return c;
+  }, [data]);
 
   const renderProcessContent = (row) => {
     const { verifyNote } = row.notes || {};
@@ -444,7 +558,7 @@ export default function StatusProses() {
             ) : (
               <>
                 {visible.map((r, i) => (
-                  <tr key={r._raw?.id ?? i}>
+                  <tr key={r._raw?.local_id ?? r._raw?.id ?? i}>
                     <td data-label="Nama Berkas">{r.name}</td>
                     <td data-label="Jenis Dokumen" className="muted">{r.docType}</td>
                     <td data-label="Tanggal Pembaruan">

@@ -78,36 +78,140 @@ export default function Step4({ data, setData, back, next }) {
       ((data.sifatCidera?.toUpperCase() === "LL" || data.sifatCidera?.toUpperCase() === "LUKA-LUKA") && dokumenOkLL)
     );
 
+  // ✅ Versi aman & fleksibel
+  async function uploadFotoToStorage(supabase, fileOrDataUrl, folder = "foto-survey") {
+    const BUCKET_NAME = "foto-survey"; 
+
+    // 0) Kalau sudah URL http(s), langsung kembalikan
+    if (typeof fileOrDataUrl === "string" && /^https?:\/\//.test(fileOrDataUrl)) {
+      return fileOrDataUrl;
+    }
+
+    // 1) Normalisasi input -> dapatkan body (Blob/File/Uint8Array), contentType, ext
+    let body; 
+    let contentType = "application/octet-stream";
+    let ext = "bin";
+
+    // a) Data URL (base64)
+    if (typeof fileOrDataUrl === "string" && fileOrDataUrl.startsWith("data:")) {
+      const [header, base64] = fileOrDataUrl.split(",");
+      const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
+      contentType = mime;
+      ext = mime.split("/")[1] || "jpg";
+
+      // atob di browser; kalau Node/React Native, ganti dengan Buffer.from(base64, 'base64')
+      const binary = typeof atob === "function" ? atob(base64) : Buffer.from(base64, "base64").toString("binary");
+      const len = binary.length;
+      const u8 = new Uint8Array(len);
+      for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
+      body = u8;
+
+    // b) File / Blob
+    } else if (typeof File !== "undefined" && fileOrDataUrl instanceof File) {
+      body = fileOrDataUrl;
+      contentType = fileOrDataUrl.type || "application/octet-stream";
+      const name = fileOrDataUrl.name || "";
+      ext = (name.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
+
+    // c) { file: File } (beberapa komponen upload bungkus begini)
+    } else if (fileOrDataUrl?.file && typeof File !== "undefined" && fileOrDataUrl.file instanceof File) {
+      const f = fileOrDataUrl.file;
+      body = f;
+      contentType = f.type || "application/octet-stream";
+      const name = f.name || "";
+      ext = (name.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
+
+    } else {
+      console.warn("Format foto tidak dikenal:", fileOrDataUrl);
+      return null;
+    }
+
+    // 2) Buat path unik. Jangan pakai leading slash.
+    const safeFolder = folder.replace(/^\/+|\/+$/g, "");
+    const filePath = `${safeFolder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+
+    // 3) Upload ke bucket yang benar
+    const { error: uploadError } = await supabase
+      .storage
+      .from("foto-survey")              
+      .upload(filePath, body, {
+        contentType,                  
+        // upsert: true,              // aktifkan jika ingin overwrite path yang sama
+      });
+
+    if (uploadError) {
+      console.error("Upload error:", uploadError);
+      throw uploadError;
+    }
+
+    // 4) Ambil URL
+    //    - Jika bucket Public: getPublicUrl bisa dipakai.
+    //    - Jika bucket Private: gunakan createSignedUrl (contoh di bawah).
+    const { data: pub } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
+    const publicUrl = pub?.publicUrl;
+
+    if (publicUrl) return publicUrl;
+
+    // (Opsional) Kalau bucket private, generate signed URL 1 jam:
+    const { data: signed, error: signErr } = await supabase
+      .storage
+      .from(BUCKET_NAME)
+      .createSignedUrl(filePath, 60 * 60);
+    if (signErr) throw signErr;
+    return signed?.signedUrl || null;
+  }
+
   // 🖨️ Fungsi Download / Cetak HTML (versi Kunjungan RS)
   async function saveKunjunganToSupabase(data) {
     try {
+      // 1) Upload semua foto -> jadi array URL
+      const fotoSurveyList = Array.isArray(data.fotoSurveyList) ? data.fotoSurveyList : [];
+      const uploadedUrls = [];
+      for (const f of fotoSurveyList) {
+        const url = await uploadFotoToStorage(supabase, f, "foto-survey");
+        if (url) uploadedUrls.push({ name: f?.name || "f", url });
+      }
+
+      // 2) Upload TTD kalau masih dataURL
+      let ttdUrl = data.petugasTtd;
+      if (ttdUrl && typeof ttdUrl === "string" && ttdUrl.startsWith("data:")) {
+        ttdUrl = await uploadFotoToStorage(supabase, ttdUrl, "ttd-petugas");
+      }
+
+      // 3) Normalisasi tanggal (kalau masih Date)
+      const toIso = (v) =>
+        v instanceof Date ? v.toISOString() : (typeof v === "string" ? v : null);
+
+      const payload = {
+        petugas: data.petugas,
+        petugas_jabatan: "Petugas Pelayanan",
+        wilayah: data.wilayah,
+        korban: data.korban,
+        rumah_sakit: data.rumahSakit,
+        lokasi_kecelakaan: data.lokasiKecelakaan,
+        tanggal_kecelakaan: toIso(data.tanggalKecelakaan),
+        tgl_masuk_rs: toIso(data.tglMasukRS),
+        tgl_jam_notifikasi: toIso(data.tglJamNotifikasi),
+        tgl_jam_kunjungan: toIso(data.tglJamKunjungan),
+        uraian: data.uraianKunjungan,
+        rekomendasi: data.rekomendasi,
+        petugas_ttd: ttdUrl || null,
+        foto_survey: uploadedUrls, 
+      };
+
       const { data: inserted, error } = await supabase
         .from("form_kunjungan_rs")
-        .insert({
-          petugas: data.petugas,
-          petugas_jabatan: "Petugas Pelayanan",
-          wilayah: data.wilayah,
-          korban: data.korban,
-          rumah_sakit: data.rumahSakit,
-          lokasi_kecelakaan: data.lokasiKecelakaan,
-          tanggal_kecelakaan: data.tanggalKecelakaan,
-          tgl_masuk_rs: data.tglMasukRS,
-          tgl_jam_notifikasi: data.tglJamNotifikasi,
-          tgl_jam_kunjungan: data.tglJamKunjungan,
-          uraian: data.uraianKunjungan,
-          rekomendasi: data.rekomendasi,
-          petugas_ttd: data.petugasTtd || null,
-          foto_survey: data.fotoSurveyList || [],
-        })
+        .insert(payload)
         .select()
         .single();
 
       if (error) throw error;
+
       console.log("✅ Tersimpan ke Supabase:", inserted);
       return inserted.id;
     } catch (err) {
-      console.error("❌ Gagal simpan Supabase:", err);
-      toast.error("Gagal menyimpan data ke Supabase.");
+      console.error("❌ Gagal simpan Supabase:", err?.message || err);
+      toast.error(`Gagal menyimpan data ke Supabase: ${err?.message || ""}`);
       return null;
     }
   }
@@ -464,6 +568,8 @@ export default function Step4({ data, setData, back, next }) {
         form_keterangan_ahli_waris: !!raw.attachSurvey?.formKeteranganAW,
         surat_keterangan_kematian: !!raw.attachSurvey?.skKematian,
         akta_kelahiran: !!raw.attachSurvey?.aktaKelahiran,
+        map_ss: !!raw.attachSurvey?.mapSS,
+        barcode_qr: !!raw.attachSurvey?.barcode,
         foto_survey_count: Array.isArray(raw.fotoSurveyList)
           ? raw.fotoSurveyList.length
           : Array.isArray(raw.attachSurvey?.fotoSurvey)
@@ -720,7 +826,12 @@ export default function Step4({ data, setData, back, next }) {
       // === buat halaman per lampiran ===
       const filePages = [];
       if (data.attachSurvey) {
-        for (const [key, file] of Object.entries(data.attachSurvey)) {
+        const order = ["mapSS","barcode"];
+        const ordered = [
+          ...order.filter(k => k in data.attachSurvey).map(k => [k, data.attachSurvey[k]]),
+          ...Object.entries(data.attachSurvey).filter(([k]) => !order.includes(k))
+        ];
+        for (const [key, file] of ordered) {
           if (!file) continue;
           const files = Array.isArray(file) ? file : [file];
 
@@ -1087,6 +1198,31 @@ export default function Step4({ data, setData, back, next }) {
           '<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>';
 
         const petugasSrc = vv.petugasTtd || null;
+      
+      const mapSrc = data.attachSurvey?.mapSS?.url || "";
+      const qrSrc  = data.attachSurvey?.barcode?.url || "";
+
+      const lampiranHTML = `
+        <div style="page-break-before:always"></div>
+        <h1 style="text-align:left;font-size:16pt;margin:0 0 6mm">Lampiran</h1>
+        <div style="display:grid;grid-template-columns:2fr 1.1fr;gap:6mm;align-items:start">
+          <div>
+            ${mapSrc ? `<img src="${mapSrc}" style="width:100%;height:auto;border:0.3mm solid #000;border-radius:2mm" />` : `<div style="height:80mm;border:0.3mm solid #000;border-radius:2mm"></div>`}
+          </div>
+          <div style="display:grid;grid-template-rows:auto auto;row-gap:6mm">
+            <div>
+              ${fotos?.[0]?.url ? `<img src="${fotos[0].url}" style="width:100%;height:auto;border:0.3mm solid #000;border-radius:2mm" />` : `<div style="height:46mm;border:0.3mm solid #000;border-radius:2mm"></div>`}
+            </div>
+            <div style="justify-self:center">
+              ${qrSrc ? `<img src="${qrSrc}" style="width:42mm;height:42mm;border:0.3mm solid #000;border-radius:2mm;padding:2mm" />` : `<div style="width:42mm;height:42mm;border:0.3mm solid #000;border-radius:2mm"></div>`}
+            </div>
+          </div>
+        </div>
+        ${fotos.length > 1 ? `
+          <div style="margin-top:6mm;display:flex;flex-wrap:wrap;gap:4mm">
+            ${fotos.slice(1).map(x => `<img src="${x.url}" style="height:38mm;border:0.3mm solid #000;border-radius:2mm" />`).join("")}
+          </div>` : ""}
+      `;
 
       const srcdoc = 
       `<!DOCTYPE html><html><head><meta charset="utf-8"/>
@@ -1178,7 +1314,7 @@ export default function Step4({ data, setData, back, next }) {
         </div>
       </div>
 
-      <div class="foto-container">${imgsHTML}</div>
+      ${lampiranHTML}
 
       </body></html>`;
 

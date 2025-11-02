@@ -5,7 +5,7 @@ import { PDFDocument, rgb } from "pdf-lib";
 import JsBarcode from "jsbarcode";
 import { supabase } from "../lib/supabaseClient";
 
-async function buildPreviewHTML_MD(vv, objURL) {
+  async function buildPreviewHTML_MD(vv, objURL) {
     const escapeHtml = (str = "") =>
       String(str)
         .replace(/&/g, "&amp;")
@@ -372,6 +372,15 @@ async function buildPreviewHTML_MD(vv, objURL) {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
+    const fmtDate = (d) => {
+      if (!d) return "-";
+      try {
+        const date = new Date(d);
+        if (isNaN(date.getTime())) return d;
+        return date.toLocaleDateString("id-ID", { day:"2-digit", month:"long", year:"numeric" });
+      } catch { return d; }
+    };
+
     // Kumpulkan foto dari beberapa kemungkinan field (tanpa konversi async)
     const fotoCandidates =
       (Array.isArray(vv.allPhotos) && vv.allPhotos) ||
@@ -410,141 +419,229 @@ async function buildPreviewHTML_MD(vv, objURL) {
           .join("")
       : "<i>Tidak ada foto dilampirkan.</i>";
 
+    // ✅ siapkan src ttd petugas kalau ada (opsional)
+    const petugasSrc = (() => {
+      const t = vv.petugasTtd;
+      if (!t) return null;
+      if (typeof t === "string") return t;
+      if (t.dataURL) return t.dataURL;
+      if (t.url) return t.url;
+      if (t.path) return t.path;
+      if (t.file instanceof File && typeof objURL === "function") return objURL(t.file);
+      return null;
+    })();
+
     return `<!DOCTYPE html>
-  <html lang="id">
-  <head>
-    <meta charset="UTF-8" />
-    <title>Laporan Kunjungan RS - ${escapeHtml(vv.korban || "Anon")}</title>
-    <style>
-      @page { size: A4; margin: 12mm; }
-      body { font-family:"Times New Roman", serif; color:#000; background:#fff; padding:40px 50px; line-height:1.6; }
-      h2 { text-align:center; text-transform:uppercase; font-size:18px; font-weight:bold; margin-bottom:0; }
-      h3 { text-align:center; margin-top:4px; font-size:14px; font-weight:normal; }
-      table { width:100%; border-collapse:collapse; margin-top:20px; font-size:14px; }
-      td { padding:4px 6px; vertical-align:top; }
-      .label { width:220px; font-weight:bold; }
-      .section-title { font-weight:bold; margin-top:20px; text-transform:uppercase; }
-      .box { border:1px solid #000; padding:10px; margin-top:6px; min-height:60px; white-space:pre-wrap; }
-      .ttd { display:flex; justify-content:space-between; margin-top:60px; font-size:14px; text-align:center; }
-      .foto-container { display:flex; flex-wrap:wrap; margin-top:30px; gap:10px; }
-      .footer-note { margin-top:30px; font-size:14px; text-align:justify; }
-    </style>
-  </head>
-  <body>
-    <h2>LEMBAR HASIL KUNJUNGAN KE RUMAH SAKIT</h2>
-    <h3>APLIKASI MOBILE PELAYANAN</h3>
+    <html lang="id">
+    <head>
+      <meta charset="UTF-8" />
+      <title>Laporan Kunjungan RS - ${escapeHtml(vv.korban || "Anon")}</title>
+      <style>
+        @page { size: A4; margin: 12mm; }
+        body { font-family:"Times New Roman", serif; color:#000; background:#fff; padding:40px 50px; line-height:1.6; }
+        h2 { text-align:center; text-transform:uppercase; font-size:18px; font-weight:bold; margin-bottom:0; }
+        h3 { text-align:center; margin-top:4px; font-size:14px; font-weight:normal; }
+        table { width:100%; border-collapse:collapse; margin-top:20px; font-size:14px; }
+        td { padding:4px 6px; vertical-align:top; }
+        .label { width:220px; font-weight:bold; }
+        .section-title { font-weight:bold; margin-top:20px; text-transform:uppercase; }
+        .box { border:1px solid #000; padding:10px; margin-top:6px; min-height:60px; white-space:pre-wrap; }
+        .ttd { display:flex; justify-content:space-between; margin-top:60px; font-size:14px; text-align:center; }
+        .foto-container { display:flex; flex-wrap:wrap; margin-top:30px; gap:10px; }
+        .footer-note { margin-top:30px; font-size:14px; text-align:justify; }
+      </style>
+    </head>
+    <body>
+      <h2>LEMBAR HASIL KUNJUNGAN KE RUMAH SAKIT</h2>
+      <h3>APLIKASI MOBILE PELAYANAN</h3>
 
-    <table>
-      <tr><td class="label">NPP / Nama Petugas</td><td>: ${escapeHtml(vv.petugas || "-")}</td></tr>
-      <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${escapeHtml(vv.wilayah || "-")}</td></tr>
-      <tr><td class="label">Nama Korban</td><td>: ${escapeHtml(vv.korban || "-")}</td></tr>
-      <tr><td class="label">Lokasi Kecelakaan</td><td>: ${escapeHtml(vv.lokasiKecelakaan || "-")}</td></tr>
-      <tr><td class="label">Kode RS / Nama RS</td><td>: ${escapeHtml(vv.rumahSakit || "-")}</td></tr>
-      <tr><td class="label">Tanggal Kecelakaan</td><td>: ${escapeHtml(vv.tglKecelakaan || "-")}</td></tr>
-      <tr><td class="label">Tanggal Masuk RS</td><td>: ${escapeHtml(vv.tglMasukRS || "-")}</td></tr>
-      <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${escapeHtml(vv.tglJamNotifikasi || "-")}</td></tr>
-      <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${escapeHtml(vv.tglJamKunjungan || "-")}</td></tr>
-    </table>
+      <table>
+        <tr><td class="label">NPP / Nama Petugas</td><td>: ${escapeHtml(vv.petugas || "-")}</td></tr>
+        <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${escapeHtml(vv.wilayah || "-")}</td></tr>
+        <tr><td class="label">Nama Korban</td><td>: ${escapeHtml(vv.korban || "-")}</td></tr>
+        <!-- ✅ pakai fallback lokasi + format tanggal -->
+        <tr><td class="label">Lokasi Kecelakaan</td><td>: ${escapeHtml(vv.tempatKecelakaan || vv.lokasiKecelakaan || "-")}</td></tr>
+        <tr><td class="label">Kode RS / Nama RS</td><td>: ${escapeHtml(vv.rumahSakit || "-")}</td></tr>
+        <tr><td class="label">Tanggal Kecelakaan</td><td>: ${escapeHtml(fmtDate(vv.tglKecelakaan) || "-")}</td></tr>
+        <tr><td class="label">Tanggal Masuk RS</td><td>: ${escapeHtml(fmtDate(vv.tglMasukRS) || "-")}</td></tr>
+        <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${escapeHtml(vv.tglJamNotifikasi || "-")}</td></tr>
+        <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${escapeHtml(vv.tglJamKunjungan || "-")}</td></tr>
+      </table>
 
-    <div class="section-title">Uraian Hasil Kunjungan:</div>
-    <div class="box">${escapeHtml(vv.uraianKunjungan || "") || "<i>Belum diisi.</i>"}</div>
+      <div class="section-title">Uraian Hasil Kunjungan:</div>
+      <div class="box">${escapeHtml(vv.uraianKunjungan || "") || "<i>Belum diisi.</i>"}</div>
 
-    <div class="section-title">Rekomendasi / Kesimpulan:</div>
-    <div class="box">${escapeHtml(vv.rekomendasi || "") || "<i>Belum diisi.</i>"}</div>
+      <div class="section-title">Rekomendasi / Kesimpulan:</div>
+      <div class="box">${escapeHtml(vv.rekomendasi || "") || "<i>Belum diisi.</i>"}</div>
 
-    <div class="footer-note">
-      Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
-    </div>
-
-    <div class="ttd">
-      <div>
-        Mengetahui,<br/>
-        ${vv.__showTtd
-          ? `<img src="${vv.__ttdUrl}" alt="TTD Andi" style="height:28mm;object-fit:contain;margin:8mm 0; display:block;"/>`
-          : `<br/><br/><br/><br/>`}
-        <b>Andi Raharja, S.A.B</b><br/>
-        <i>Kepala Bagian Operasional</i>
+      <div class="footer-note">
+        Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
       </div>
-      <div>
-        Petugas yang melakukan kunjungan,<br/><br/><br/><br/>
-        <b>${escapeHtml(vv.petugas || "................................")}</b><br/>
-        <i>${escapeHtml(vv.petugasJabatan || "")}</i>
-      </div>
-    </div>
 
-    <div class="foto-container">${fotosHTML}</div>
-  </body>
-  </html>`;
+      <div class="ttd">
+        <div>
+          Mengetahui,<br/>
+          ${vv.__showTtd
+            ? `<img src="${vv.__ttdUrl}" alt="TTD Pejabat" style="height:28mm;object-fit:contain;margin:8mm 0; display:block;"/>`
+            : `<br/><br/><br/><br/>`}
+          <b>Andi Raharja, S.A.B</b><br/>
+          <i>Kepala Bagian Operasional</i>
+        </div>
+        <div>
+          Petugas yang melakukan kunjungan,<br/><br/>
+          ${petugasSrc ? `<img src="${petugasSrc}" alt="TTD Petugas" style="max-height:28mm; object-fit:contain; display:block; margin:8mm auto;"/>`
+                        : `<br/><br/><br/><br/>`}
+          <b>${escapeHtml(vv.petugas || "................................")}</b><br/>
+          <i>${escapeHtml(vv.petugasJabatan || "")}</i>
+        </div>
+      </div>
+
+      <div class="foto-container">${fotosHTML}</div>
+    </body>
+    </html>`;
   }
+
 
   async function prepareForOutput(rec) {
     const vv = { ...rec };
 
+    // cari key di object (nested), case-insensitive, normalisasi snake/camel
+    const norm = (s) => String(s || "").toLowerCase().replace(/[_\s-]/g, "");
+    function deepPick(obj, aliases) {
+      if (!obj || typeof obj !== "object") return "";
+      const want = new Set(aliases.map(norm));
+      const stack = [{ o: obj }];
+      while (stack.length) {
+        const { o } = stack.pop();
+        if (!o || typeof o !== "object") continue;
+        for (const k of Object.keys(o)) {
+          const v = o[k];
+          if (want.has(norm(k))) {
+            if (v !== undefined && v !== null && (typeof v !== "string" || v.trim() !== "")) {
+              return v;
+            }
+          }
+          if (v && typeof v === "object") stack.push({ o: v });
+        }
+      }
+      return "";
+    }
+
+    // --- helper kecil ---
+    const coalesce = (...xs) => xs.find(v => v !== undefined && v !== null && String(v).trim() !== "") ?? "";
+    const asArr = (x) => Array.isArray(x) ? x : (x ? [x] : []);
+    const toISOish = (d) => {
+      // Terima "YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", timestamp/Date, dll
+      if (!d) return "";
+      if (d instanceof Date) return d.toISOString();
+      if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d;                // YYYY-MM-DD
+      const m1 = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(d);  // DD/MM/YYYY atau DD-MM-YYYY
+      if (m1) {
+        const [_, dd, mm, yyyy] = m1;
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      // biarkan Date mencoba
+      const t = new Date(d);
+      return isNaN(t.getTime()) ? "" : t.toISOString();
+    };
+
     // --- ID & waktu aman ---
     vv.id =
-      rec.id ||
-      rec.local_id ||
-      rec.row_id ||
-      rec.uuid ||
-      `${rec.waktu || rec.created_at || Date.now()}__${rec.no_pl || rec.noPL || "nop"}__${rec.template || "tpl"}`;
+      rec.id || rec.local_id || rec.row_id || rec.uuid ||
+      `${coalesce(rec.waktu, rec.created_at, Date.now())}__${coalesce(rec.no_pl, rec.noPL, "nop")}__${coalesce(rec.template, "tpl")}`;
 
-    vv.createdAt = rec.createdAt || rec.waktu || rec.created_at || new Date().toISOString();
-    vv.waktu     = rec.waktu     || vv.createdAt;
+    vv.createdAt = coalesce(rec.createdAt, rec.waktu, rec.created_at, new Date().toISOString());
+    vv.waktu     = coalesce(rec.waktu, vv.createdAt);
 
     // --- Template & label ---
     const tpl = (rec.template || "").toLowerCase();
-    vv.template = rec.template || "";
-    vv.jenisSurveyLabel =
-      rec.jenisSurveyLabel ||
-      rec.jenis_survey_label ||
-      rec.jenisSurvei ||
-      rec.jenis_survei ||
-      rec.sifatCidera ||
-      "";
+    vv.template = coalesce(rec.template);
+    vv.jenisSurveyLabel = coalesce(
+      rec.jenisSurveyLabel, rec.jenis_survey_label, rec.jenisSurvei, rec.jenis_survei, rec.sifatCidera
+    );
+    vv.jenisSurvei = coalesce(
+      rec.jenisSurvei, rec.jenis_survei,
+      tpl.includes("survei_md") ? "Meninggal Dunia" : "",
+      tpl.includes("survei_ll") ? "Luka-luka"       : ""
+    );
 
-    vv.jenisSurvei =
-      rec.jenisSurvei ||
-      rec.jenis_survei ||
-      (tpl.includes("survei_md") ? "Meninggal Dunia" :
-      tpl.includes("survei_ll") ? "Luka-luka" : "");
+    // --- Data umum / identitas (dengan alias umum) ---
+    vv.petugas        = coalesce(rec.petugas, rec.petugasSurvei, rec.petugas_survei);
+    vv.petugasSurvei  = coalesce(rec.petugasSurvei, rec.petugas, rec.petugas_survei);
+    vv.korban         = coalesce(rec.korban, rec.namaKorban, rec.nama_korban);
+    vv.namaKorban     = coalesce(rec.namaKorban, rec.korban, rec.nama_korban);
+    vv.noPL           = coalesce(rec.noPL, rec.no_pl);
+    vv.noBerkas       = coalesce(rec.noBerkas, rec.no_berkas);
+    vv.alamatKorban   = coalesce(rec.alamatKorban, rec.alamat_korban, rec.alamat);
+    vv.tempatKecelakaan = coalesce(
+      rec.tempatKecelakaan, rec.lokasiKecelakaan, rec.lokasi_kecelakaan,
+      rec.lokasiKejadian, rec.lokasi_kejadian, rec.tempat_kejadian,
+      rec.lokasi, rec.tempat
+    );
+    const lokasiA = coalesce(
+      rec.tempatKecelakaan, rec.lokasiKecelakaan, rec.lokasi_kecelakaan,
+      rec.lokasiKejadian, rec.lokasi_kejadian, rec.tempat_kejadian,
+      rec.lokasi, rec.tempat
+    );
+    const lokasiB = deepPick(rec, [
+      "tempatKecelakaan","lokasiKecelakaan","lokasi_kecelakaan",
+      "lokasiKejadian","lokasi_kejadian","tempat_kejadian",
+      "lokasi","tempat"
+    ]);
+    vv.tempatKecelakaan = coalesce(lokasiA, lokasiB);
 
-    // --- Data umum / identitas ---
-    vv.petugas     = rec.petugas || rec.petugasSurvei || "";
-    vv.petugasSurvei = rec.petugasSurvei || rec.petugas || "";
-    vv.korban      = rec.korban || rec.namaKorban || "";
-    vv.namaKorban  = rec.namaKorban || rec.korban || "";
-    vv.noPL        = rec.noPL || rec.no_pl || "";
-    vv.noBerkas    = rec.noBerkas || "";
-    vv.alamatKorban= rec.alamatKorban || "";
-    vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
-    vv.wilayah     = rec.wilayah || "";
-    vv.rumahSakit  = rec.rumahSakit || "";
+    vv.lokasiKecelakaan = coalesce(rec.lokasiKecelakaan, rec.lokasi_kecelakaan, vv.tempatKecelakaan);
 
-    // --- Tanggal-tanggal ---
-    vv.tglKecelakaan =
-      rec.tglKecelakaan ||
-      rec.tanggalKecelakaan ||
-      rec.tgl_kecelakaan ||
-      "";
+    // ✅ wilayah: tambah fallback alias umum
+    vv.wilayah = coalesce(
+      rec.wilayah,
+      rec.loket, rec.loketKantor, rec.loket_wilayah, rec.loket_kantor,
+      rec.kantorWilayah, rec.kantor_wilayah,
+      deepPick(rec, ["wilayah","loket","loketKantor","kantorWilayah","loket_wilayah","loket_kantor","kantor_wilayah"])
+    );
 
-    vv.hariTanggal =
-      rec.hariTanggal ||
-      rec.tanggalKecelakaan ||
-      vv.tglKecelakaan ||
-      "";
+    vv.rumahSakit = coalesce(
+      rec.rumahSakit, rec.namaRS, rec.kodeRS, rec.rs,
+      rec.nama_rs, rec.kode_rs, rec.rsNama, rec.rs_nama,
+      deepPick(rec, ["rumahSakit","namaRS","kodeRS","rs","nama_rs","kode_rs","rsNama","rs_nama"])
+    );
 
-    vv.tglMasukRS       = rec.tglMasukRS || "";
-    vv.tglJamNotifikasi = rec.tglJamNotifikasi || "";
-    vv.tglJamKunjungan  = rec.tglJamKunjungan || "";
+    // --- Sumber Informasi
+    vv.sumbers         = asArr(coalesce(
+      rec.sumbers, rec.sumberInformasi, rec.sumber_informasi, rec.sumberInfo, rec.sumber_info,
+      deepPick(rec, ["sumbers","sumberInformasi","sumber_informasi","sumberInfo","sumber_info"])
+    ));
 
-    // --- Konten narasi (survey & kunjungan) ---
-    vv.uraian       = rec.uraianSurvei || rec.uraian || "";
-    vv.kesimpulan   = rec.kesimpulanSurvei || rec.kesimpulan || "";
-    vv.uraianKunjungan = rec.uraianKunjungan || "";
-    vv.rekomendasi  = rec.rekomendasi || "";
+    // --- Tanggal-tanggal (longgar + alias) ---
+    vv.tglKecelakaan = toISOish(coalesce(
+      rec.tglKecelakaan, rec.tanggalKecelakaan, rec.tgl_kecelakaan, rec.tanggal_kecelakaan,
+      deepPick(rec, ["tglKecelakaan","tanggalKecelakaan","tgl_kecelakaan","tanggal_kecelakaan"])
+    ));
+    vv.hariTanggal = toISOish(coalesce(
+      rec.hariTanggal, rec.tanggalSurvei, rec.tanggal_survei, rec.tglSurvei, rec.tgl_survei,
+      rec.tanggalKecelakaan, vv.tglKecelakaan
+    ));
+    vv.tglMasukRS = toISOish(coalesce(
+      rec.tglMasukRS, rec.tanggalMasukRS, rec.tgl_masuk_rs, rec.tanggal_masuk_rs, rec.tglMasuk, rec.tanggal_masuk,
+      deepPick(rec, ["tglMasukRS","tanggalMasukRS","tgl_masuk_rs","tanggal_masuk_rs","tglMasuk","tanggal_masuk"])
+    ));
+    vv.tglJamNotifikasi = coalesce(
+      rec.tglJamNotifikasi, rec.tgl_jam_notifikasi, rec.jamNotifikasi, rec.waktuNotifikasi, rec.notifAt, rec.notifikasi_at,
+      deepPick(rec, ["tglJamNotifikasi","tgl_jam_notifikasi","jamNotifikasi","waktuNotifikasi","notifAt","notifikasi_at"])
+    );
+    vv.tglJamKunjungan = coalesce(
+      rec.tglJamKunjungan, rec.tgl_jam_kunjungan, rec.jamKunjungan, rec.waktuKunjungan, rec.visitAt, rec.kunjungan_at,
+      deepPick(rec, ["tglJamKunjungan","tgl_jam_kunjungan","jamKunjungan","waktuKunjungan","visitAt","kunjungan_at"])
+    );
 
-    // --- Hubungan AW (normalisasi boolean/string) ---
-    let hs = rec.hubunganSesuai;
+    // --- Narasi ---
+    vv.uraian       = coalesce(rec.uraianSurvei, rec.uraian);
+    vv.kesimpulan   = coalesce(rec.kesimpulanSurvei, rec.kesimpulan);
+    vv.uraianKunjungan = coalesce(rec.uraianKunjungan, deepPick(rec, ["uraianKunjungan","uraian_kunjungan"]));
+    vv.rekomendasi  = coalesce(rec.rekomendasi,     deepPick(rec, ["rekomendasi","kesimpulanRS","kesimpulan_rs"]));
+
+    // --- Hubungan AW ---
+    let hs = rec.hubunganSesuai ?? rec.hubungan_sesuai;
     if (typeof hs === "string") {
       const s = hs.trim().toLowerCase();
       if (["ya","y","true","1","sesuai"].includes(s)) hs = true;
@@ -552,91 +649,101 @@ async function buildPreviewHTML_MD(vv, objURL) {
     }
     vv.hubunganSesuai = hs;
 
-    // --- TTD/pejabat (fallback aman) ---
-    vv.petugasJabatan = rec.petugasJabatan || "";
-    vv.pejabatMengetahuiName    = rec.pejabatMengetahuiName    || "Andi Raharja, S.A.B";
-    vv.pejabatMengetahuiJabatan = rec.pejabatMengetahuiJabatan || "Kepala Bagian Operasional";
+    // --- Pejabat/TTD (builder baca __showTtd & __ttdUrl) ---
+    vv.petugasJabatan = coalesce(rec.petugasJabatan, rec.petugas_jabatan);
+    vv.pejabatMengetahuiName    = coalesce(rec.pejabatMengetahuiName,    "Andi Raharja, S.A.B");
+    vv.pejabatMengetahuiJabatan = coalesce(rec.pejabatMengetahuiJabatan, "Kepala Bagian Operasional");
+
+    vv.__showTtd = rec.__showTtd ?? rec.showTtd ?? false;
+    vv.__ttdUrl  = coalesce(rec.__ttdUrl, rec.ttdUrl, rec.pejabatTtd, rec.ttd_mengetahui);
+
+    // Kalau kamu juga mau pakai TTD petugas di template RS:
+    vv.petugasTtd = coalesce(rec.petugasTtd, rec.petugas_ttd);
 
     // --- Status & verifikasi ---
-    vv.status            = rec.status || "terkirim";
-    vv.verified          = !!rec.verified;
-    vv.verifiedAt        = rec.verifiedAt || rec.verified_at || null;
-    vv.verifyNote        = rec.verifyNote || rec.verify_note || null;
-    vv.verifyChecklist   = rec.verifyChecklist || rec.verify_checklist || null;
-    vv.unverifiedAt      = rec.unverifiedAt || rec.unverified_at || null;
-    vv.unverifyNote      = rec.unverifyNote || rec.unverify_note || null;
+    vv.status          = coalesce(rec.status, "terkirim");
+    vv.verified        = !!rec.verified;
+    vv.verifiedAt      = coalesce(rec.verifiedAt, rec.verified_at) || null;
+    vv.verifyNote      = coalesce(rec.verifyNote, rec.verify_note) || null;
+    vv.verifyChecklist = coalesce(rec.verifyChecklist, rec.verify_checklist) || null;
+    vv.unverifiedAt    = coalesce(rec.unverifiedAt, rec.unverified_at) || null;
+    vv.unverifyNote    = coalesce(rec.unverifyNote, rec.unverify_note) || null;
 
-    // --- Rating/feedback ---
-    vv.rating   = rec.rating ?? rec.rating_value ?? rec.star ?? null;
-    vv.feedback = rec.feedback ?? rec.feedback_text ?? rec.ulasan ?? null;
+    // --- Attachments (gabungkan beberapa kemungkinan container) ---
+    let att = (typeof rec.attachSurvey === "object" && rec.attachSurvey)
+           || (typeof rec.attach_survey === "object" && rec.attach_survey)
+           || (typeof rec.attachments  === "object" && rec.attachments)
+           || rec.attachSurvey || rec.attach_survey || rec.attachments || {};
+    // ✅ kalau string JSON, parse
+    if (typeof att === "string") {
+      try { att = JSON.parse(att); } catch {}
+    }
+    vv.attachSurvey = (att && typeof att === "object") ? att : {};
 
-    // --- Kumpulan lampiran: satukan jadi satu format seragam ---
-    vv.attachSurvey = rec.attachSurvey && typeof rec.attachSurvey === "object" ? rec.attachSurvey : {};
-
+    // --- Kumpulan file jadi format seragam ---
     const files = [];
-
     const pushFile = (f, label = "Lampiran") => {
       if (!f) return;
-      if (Array.isArray(f)) { f.forEach((x) => pushFile(x, label)); return; }
-
+      if (Array.isArray(f)) { f.forEach(x => pushFile(x, label)); return; }
       if (typeof f === "string") {
         files.push({ label, name: f.split("/").pop() || label, url: f });
         return;
       }
-
-      // Object
-      const name =
-        f.name || f.fileName || f.filename || f.label || label;
-      const dataURL =
-        f.dataURL || f.url || f.path ||
-        (f.file instanceof File ? f.file : null);
-
-      const entry = {
+      // object
+      const name = coalesce(f.name, f.fileName, f.filename, f.label, label);
+      const src  = coalesce(f.dataURL, f.url, f.path);
+      const fileObj = (typeof File !== "undefined" && f.file instanceof File) ? f.file : undefined;
+      files.push({
         type: f.type || undefined,
         label: f.label || label,
         name,
-        url: typeof dataURL === "string" ? dataURL : undefined,
-        dataURL: typeof dataURL !== "string" ? undefined : undefined,
-        file: dataURL instanceof File ? dataURL : undefined,
+        url: typeof src === "string" ? src : undefined,
+        dataURL: undefined, // biarin builder yang handle objURL untuk File
+        file: fileObj,
         size: f.size,
-      };
-      files.push(entry);
+      });
     };
 
-    // Sumber umum yang sering dipakai FormPage
+    // sumber umum form
     pushFile(rec.fotoSurveyList, "Foto Survey");
+    pushFile(rec.fotoSurvey,     "Foto Survey");
     pushFile(rec.fotoList,       "Foto Survey");
+    pushFile(rec.fotoKejadianList, "Foto Kejadian");
     pushFile(rec.laporanRSList,  "Laporan RS");
     pushFile(rec.rsList,         "Berkas RS");
 
-    // Root-level potensi lampiran per jenis
+    // root-level kemungkinan lampiran
     ["ktp","kk","bukuTabungan","formPengajuan","formKeteranganAW","skKematian","aktaKelahiran"]
       .forEach((k) => pushFile(rec[k], k));
 
-    // Object attachSurvey { ktp: ..., kk: ..., ... }
+    // dari attachSurvey object
     if (vv.attachSurvey && !Array.isArray(vv.attachSurvey)) {
       Object.entries(vv.attachSurvey).forEach(([k, v]) => pushFile(v, k));
     }
 
     vv.files = files;
 
-    // Derivasi: kumpulan foto (untuk preview RS/LL)
-    const isImage = (nOrUrl = "") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(nOrUrl);
-    vv.allPhotos = files.filter((f) =>
-      isImage((f.name || "").toLowerCase()) || isImage((f.url || "").toLowerCase()) || f.type === "foto"
+    // --- Turunan: kumpulan foto untuk preview RS/LL ---
+    const isImage = (s="") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(s);
+    vv.allPhotos = files.filter(f =>
+      isImage(String(f.name || "").toLowerCase()) ||
+      isImage(String(f.url  || "").toLowerCase()) ||
+      f.type === "foto"
     );
 
-    // Hitungan ringkas
+    // Agar builder LL dapat sumber foto langsung juga:
+    vv.fotoSurveyList = asArr(coalesce(rec.fotoSurveyList, rec.fotoSurvey, att.fotoSurvey))
+      .filter(Boolean);
+
+    // --- Hitungan ringkas ---
     vv.counts = {
-      singles: rec.rsList?.length || 0,
-      fotoSurvey: (rec.fotoList?.length || rec.fotoSurveyList?.length || 0),
-      fotoKejadian: rec.fotoKejadianList?.length || 0,
+      singles: asArr(rec.rsList).length,
+      fotoSurvey: asArr(rec.fotoList).length || asArr(rec.fotoSurveyList).length,
+      fotoKejadian: asArr(rec.fotoKejadianList).length,
     };
 
-    // “_updatedAt” untuk sorting di DataForm
-    vv._updatedAt =
-      rec.updated_at || rec.verified_at || rec.unverified_at ||
-      rec.waktu || rec.createdAt || rec.created_at || null;
+    // --- updatedAt untuk sorting ---
+    vv._updatedAt = coalesce(rec.updated_at, rec.verified_at, rec.unverified_at, rec.waktu, rec.createdAt, rec.created_at) || null;
 
     return vv;
   }
@@ -725,8 +832,15 @@ export default function VerifikatorDashboard() {
         return;
       }
 
-      // siapkan data untuk preview
       const vv = await prepareForOutput(data);
+      console.log("RS DEBUG", { // ✅ debug cek isi sebelum render
+        wilayah: vv.wilayah,
+        lokasi: vv.tempatKecelakaan || vv.lokasiKecelakaan,
+        rs: vv.rumahSakit,
+        tglMasukRS: vv.tglMasukRS,
+        notif: vv.tglJamNotifikasi,
+        kunjungan: vv.tglJamKunjungan,
+      });
       const ver = (data.counts && data.counts.verifikator) || {};
       vv.__showTtd =
         ver.status === "disetujui" ||
@@ -786,6 +900,14 @@ export default function VerifikatorDashboard() {
   const openPreview = useCallback(async (rec) => {
     if (!rec) return;
     const vv = await prepareForOutput(rec);
+    console.log("RS DEBUG (openPreview)", {
+      wilayah: vv.wilayah,
+      lokasi: vv.tempatKecelakaan || vv.lokasiKecelakaan,
+      rs: vv.rumahSakit,
+      tglMasukRS: vv.tglMasukRS,
+      notif: vv.tglJamNotifikasi,
+      kunjungan: vv.tglJamKunjungan,
+    });
     console.log("🧩 Preview data vv:", vv);
     const template = (rec.template || "").toLowerCase();
     const sifat = (rec?.sifatCidera || "").toLowerCase();
@@ -803,27 +925,19 @@ export default function VerifikatorDashboard() {
     // 🔁 1) SURVEI MENINGGAL DUNIA (MD) — cek duluan
     if (sifat.includes("meninggal") || template.includes("survei_md")) {
       const html = await buildPreviewHTML_MD(vv, objURL); // ⬅️ ini isinya
-      setDetailData({ ...vv, __variant: "md", previewHTML: html });
-      setBlobUrls(createdBlobUrls);
-      setDetailOpen(true);
+      // NOTE: fungsi ini tidak dipakai di tombol “Lihat Berkas”, biar dibiarkan
       return;
     }
 
     // 🔁 2) SURVEI LUKA-LUKA (LL)
     if (sifat.includes("luka") || template.includes("survei_ll")) {
       const html = buildPreviewHTML_LL(vv, objURL); // ⬅️ ini isinya
-      setDetailData({ ...vv, __variant: "ll", previewHTML: html });
-      setBlobUrls(createdBlobUrls);
-      setDetailOpen(true);
       return;
     }
 
     // 🔁 3) KUNJUNGAN RS (RS) — terakhir
     if (template.includes("kunjungan")) {
       const reportHTML = buildPreviewHTML_RS(vv, objURL); // ⬅️ isi preview-nya
-      setDetailData({ ...vv, __variant: "rs", previewHTML: reportHTML });
-      setBlobUrls(createdBlobUrls);
-      setDetailOpen(true);
       return;
     }
 

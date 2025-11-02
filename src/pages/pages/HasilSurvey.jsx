@@ -211,6 +211,7 @@
         v.namaKorban.trim() &&
         v.tempatKecelakaan.trim();
       // lampiran wajib
+      const lampiranMinimal = !!att.mapSS?.url && !!att.barcode?.url && (att.fotoSurvey || []).length > 0;
       if (sifatCidera === "MD") {
         const needed = [
           "ktp",
@@ -220,13 +221,12 @@
           "skKematian",
           "kk",
           "aktaKelahiran",
-          // "lhsFile",
         ];
-        const ok = needed.every((k) => !!att[k]) && (att.fotoSurvey || []).length > 0;
+        const ok = needed.every((k) => !!att[k]) && lampiranMinimal;
         return base && ok;
       }
       if (sifatCidera === "LL") {
-        return base && (att.fotoSurvey || []).length > 0;
+        return base && lampiranMinimal;
       }
       return base;
     }, [v, att, sifatCidera, sumbers]);
@@ -637,6 +637,42 @@
                 {(att.fotoSurvey || []).map((x, i) => (
                   <img key={i} src={x.url} alt={x.name} />
                 ))}
+              </div>
+            )}
+          </div>
+            <div style={{ marginTop: 10 }}>
+            <label className="label">SS Peta / Map</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const url = await fileToDataURL(f);
+                setAtt({ mapSS: { name: f.name, file: f, url } });
+              }}
+            />
+            {att.mapSS?.url && (
+              <div className="thumbs" style={{ marginTop: 8 }}>
+                <img src={att.mapSS.url} alt="SS Map" />
+              </div>
+            )}
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <label className="label">Barcode / QR</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const url = await fileToDataURL(f);
+                setAtt({ barcode: { name: f.name, file: f, url } });
+              }}
+            />
+            {att.barcode?.url && (
+              <div className="thumbs" style={{ marginTop: 8 }}>
+                <img src={att.barcode.url} alt="Barcode/QR" />
               </div>
             )}
           </div>
