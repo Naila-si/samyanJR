@@ -80,79 +80,59 @@ export default function Step4({ data, setData, back, next }) {
 
   // ✅ Versi aman & fleksibel
   async function uploadFotoToStorage(supabase, fileOrDataUrl, folder = "foto-survey") {
-    const BUCKET_NAME = "foto-survey"; 
+    const BUCKET_NAME = "foto-survey";
 
-    // 0) Kalau sudah URL http(s), langsung kembalikan
     if (typeof fileOrDataUrl === "string" && /^https?:\/\//.test(fileOrDataUrl)) {
       return fileOrDataUrl;
     }
 
-    // 1) Normalisasi input -> dapatkan body (Blob/File/Uint8Array), contentType, ext
-    let body; 
+    let body;
     let contentType = "application/octet-stream";
     let ext = "bin";
 
-    // a) Data URL (base64)
     if (typeof fileOrDataUrl === "string" && fileOrDataUrl.startsWith("data:")) {
       const [header, base64] = fileOrDataUrl.split(",");
       const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
       contentType = mime;
       ext = mime.split("/")[1] || "jpg";
-
-      // atob di browser; kalau Node/React Native, ganti dengan Buffer.from(base64, 'base64')
       const binary = typeof atob === "function" ? atob(base64) : Buffer.from(base64, "base64").toString("binary");
       const len = binary.length;
       const u8 = new Uint8Array(len);
       for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
       body = u8;
-
-    // b) File / Blob
     } else if (typeof File !== "undefined" && fileOrDataUrl instanceof File) {
       body = fileOrDataUrl;
       contentType = fileOrDataUrl.type || "application/octet-stream";
       const name = fileOrDataUrl.name || "";
       ext = (name.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
-
-    // c) { file: File } (beberapa komponen upload bungkus begini)
     } else if (fileOrDataUrl?.file && typeof File !== "undefined" && fileOrDataUrl.file instanceof File) {
       const f = fileOrDataUrl.file;
       body = f;
       contentType = f.type || "application/octet-stream";
       const name = f.name || "";
       ext = (name.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
-
     } else {
       console.warn("Format foto tidak dikenal:", fileOrDataUrl);
       return null;
     }
 
-    // 2) Buat path unik. Jangan pakai leading slash.
     const safeFolder = folder.replace(/^\/+|\/+$/g, "");
     const filePath = `${safeFolder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
 
-    // 3) Upload ke bucket yang benar
     const { error: uploadError } = await supabase
       .storage
-      .from("foto-survey")              
-      .upload(filePath, body, {
-        contentType,                  
-        // upsert: true,              // aktifkan jika ingin overwrite path yang sama
-      });
+      .from(BUCKET_NAME)        // <- konsisten pakai variabel
+      .upload(filePath, body, { contentType });
 
     if (uploadError) {
       console.error("Upload error:", uploadError);
       throw uploadError;
     }
 
-    // 4) Ambil URL
-    //    - Jika bucket Public: getPublicUrl bisa dipakai.
-    //    - Jika bucket Private: gunakan createSignedUrl (contoh di bawah).
     const { data: pub } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
     const publicUrl = pub?.publicUrl;
-
     if (publicUrl) return publicUrl;
 
-    // (Opsional) Kalau bucket private, generate signed URL 1 jam:
     const { data: signed, error: signErr } = await supabase
       .storage
       .from(BUCKET_NAME)
@@ -526,6 +506,37 @@ export default function Step4({ data, setData, back, next }) {
     return images;
   }
 
+  async function uploadSumberFotosWithSingle(supabase, surveyId, sumbers = [], bucketFolderPrefix = "form_survei_aw") {
+    const out = [];
+
+    for (let i = 0; i < sumbers.length; i++) {
+      const row = sumbers[i] || {};
+      // Prioritaskan File[] dari input; kalau kosong, pakai dataURL yang sudah kamu simpan di r.foto
+      const items =
+        Array.isArray(row._files) && row._files.length
+          ? row._files
+          : (Array.isArray(row.foto) ? row.foto : []);
+
+      const urls = [];
+      for (let j = 0; j < items.length; j++) {
+        const url = await uploadFotoToStorage(
+          supabase,
+          items[j],
+          `${bucketFolderPrefix}/${surveyId}/sumbers/${i}` // folder rapi per survei/baris
+        );
+        if (url) urls.push(url);
+      }
+
+      out.push({
+        identitas: row.identitas || "",
+        foto_urls: urls,
+        foto_count: urls.length,
+      });
+    }
+
+    return out;
+  }
+
   async function saveSurveyToSupabase(raw) {
     const toISODate = (d) => {
       if (!d) return null;
@@ -539,27 +550,30 @@ export default function Step4({ data, setData, back, next }) {
       ? raw.jenisSurvei.replace('keabsahan_waris','keabsahan_ahli_waris')
       : null;
 
-    // ⚠️ gunakan nama kolom yang terlihat di screenshot:
+    // siapkan sumbers mentah (identitas saja) untuk disimpan duluan
+    const sumbersLite = Array.isArray(raw.sumbers)
+      ? raw.sumbers.map(r => ({ identitas: r?.identitas || '' }))
+      : [];
+
     const payload = {
-      no_pl:               raw.noPL || null,
-      hari_tanggal:        toISODate(raw.hariTanggal || raw.tanggalKecelakaan) || null,
-      petugas:             raw.petugas || raw.petugasSurvei || null,
+      no_pl:                raw.noPL || null,
+      hari_tanggal:         toISODate(raw.hariTanggal || raw.tanggalKecelakaan) || null,
+      petugas:              raw.petugas || raw.petugasSurvei || null,
 
-      jenis_survei:        jenisSurvei,                         // text (bukan enum)
-      jenis_lainnya:       jenisSurvei ? null : (raw.jenisSurveiLainnya || null),
+      jenis_survei:         jenisSurvei,
+      jenis_lainnya:        jenisSurvei ? null : (raw.jenisSurveiLainnya || null),
 
-      nama_korban:         raw.korban || raw.namaKorban || null,
-      no_berkas:           raw.noBerkas || null,
-      alamat_korban:       raw.alamatKorban || null,
-      tempat_kecelakaan:        raw.tempatKecelakaan || raw.lokasiKecelakaan || null,   // <── beda nama
-      tanggal_kecelakaan:       toISODate(raw.tanggalKecelakaan || raw.tglKecelakaan) || null, // <── beda nama
-      hubungan_sesuai:        (typeof raw.hubunganSesuai === 'boolean') ? raw.hubunganSesuai : null, // <── beda nama
+      nama_korban:          raw.korban || raw.namaKorban || null,
+      no_berkas:            raw.noBerkas || null,
+      alamat_korban:        raw.alamatKorban || null,
+      tempat_kecelakaan:    raw.tempatKecelakaan || raw.lokasiKecelakaan || null,
+      tanggal_kecelakaan:   toISODate(raw.tanggalKecelakaan || raw.tglKecelakaan) || null,
+      hubungan_sesuai:      (typeof raw.hubunganSesuai === 'boolean') ? raw.hubunganSesuai : null,
 
-      sifat,               // text
-      uraian:              raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
-      kesimpulan:          raw.kesimpulanSurvei ?? null,
+      sifat,
+      uraian:               raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
+      kesimpulan:           raw.kesimpulanSurvei ?? null,
 
-      // kolom ini ADA & jsonb → aman dipakai
       attachments: {
         ktp: !!raw.attachSurvey?.ktp,
         kk: !!raw.attachSurvey?.kk,
@@ -576,18 +590,49 @@ export default function Step4({ data, setData, back, next }) {
           ? raw.attachSurvey.fotoSurvey.length
           : 0,
       },
+
+      // kolom baru:
+      sumbers: sumbersLite,           // isi awal: identitas saja (biar gampang)
+      // sumbers_paths: diisi setelah upload
+      local_id: raw.localId || null,
     };
 
     try {
-      const { data: inserted, error } = await supabase
+      // 1) INSERT duluan biar dapat ID
+      const { data: inserted, error: insErr } = await supabase
         .from('form_survei_aw')
         .insert(payload, { returning: 'representation' })
         .select()
         .single();
 
-      if (error) throw error;
-      console.log('✅ Survei tersimpan:', inserted);
-      return inserted?.id ?? null;
+      if (insErr) throw insErr;
+
+      // 2) Upload foto-foto sumber berdasarkan ID
+      const surveyId = inserted.id;
+      const uploaded = await uploadSumberFotosWithSingle({
+        surveyKey: surveyId,
+        sumbers: Array.isArray(raw.sumbers) ? raw.sumbers : [],
+        bucket: 'survei-aw', // pastikan sudah ada bucket ini di Supabase Storage
+      });
+
+      // 3) UPDATE baris dengan sumbers_paths + (opsional) lengkapi sumbers
+      const sumbersCompleted = (inserted.sumbers || []).map((r, i) => ({
+        ...r,
+        foto_count: uploaded[i]?.foto_count || 0,
+      }));
+
+      const { error: updErr } = await supabase
+        .from('form_survei_aw')
+        .update({
+          sumbers: sumbersCompleted,       // masih menyimpan identitas + foto_count
+          sumbers_paths: uploaded,         // berisi foto_paths & foto_urls
+        })
+        .eq('id', surveyId);
+
+      if (updErr) throw updErr;
+
+      console.log('✅ Survei tersimpan + sumber terunggah:', surveyId);
+      return surveyId;
     } catch (err) {
       const msg = [
         err?.message,

@@ -620,27 +620,67 @@
           {sifatCidera === "MD" && (
             <div className="grid-attach">
               <FilePick label="KTP" onPick={(f) => setAtt({ ...att, ktp: f })} file={att.ktp} />
+              {att.ktp && (
+                <button onClick={() => setAtt({ ...att, ktp: null })} className="btn-delete">Hapus</button>
+              )}
+
               <FilePick label="Buku Tabungan" onPick={(f) => setAtt({ ...att, bukuTabungan: f })} file={att.bukuTabungan} />
+              {att.bukuTabungan && (
+                <button onClick={() => setAtt({ ...att, bukuTabungan: null })} className="btn-delete">Hapus</button>
+              )}
+
               <FilePick label="Formulir Pengajuan Santunan" onPick={(f) => setAtt({ ...att, formPengajuan: f })} file={att.formPengajuan} />
+              {att.formPengajuan && (
+                <button onClick={() => setAtt({ ...att, formPengajuan: null })} className="btn-delete">Hapus</button>
+              )}
+
               <FilePick label="Formulir Keterangan Ahli Waris" onPick={(f) => setAtt({ ...att, formKeteranganAW: f })} file={att.formKeteranganAW} />
+              {att.formKeteranganAW && (
+                <button onClick={() => setAtt({ ...att, formKeteranganAW: null })} className="btn-delete">Hapus</button>
+              )}
+
               <FilePick label="Surat Keterangan Kematian" onPick={(f) => setAtt({ ...att, skKematian: f })} file={att.skKematian} />
+              {att.skKematian && (
+                <button onClick={() => setAtt({ ...att, skKematian: null })} className="btn-delete">Hapus</button>
+              )}
+
               <FilePick label="Kartu Keluarga (KK)" onPick={(f) => setAtt({ ...att, kk: f })} file={att.kk} />
+              {att.kk && (
+                <button onClick={() => setAtt({ ...att, kk: null })} className="btn-delete">Hapus</button>
+              )}
+
               <FilePick label="Akta Kelahiran" onPick={(f) => setAtt({ ...att, aktaKelahiran: f })} file={att.aktaKelahiran} />
+              {att.aktaKelahiran && (
+                <button onClick={() => setAtt({ ...att, aktaKelahiran: null })} className="btn-delete">Hapus</button>
+              )}
             </div>
           )}
 
+          {/* FOTO SURVEY */}
           <div style={{ marginTop: 10 }}>
             <label className="label">Foto Survey (boleh banyak, tanpa batas)</label>
             <input type="file" accept="image/*" multiple onChange={(e) => pushFotos(e.target.files)} />
             {!!(att.fotoSurvey || []).length && (
               <div className="thumbs">
                 {(att.fotoSurvey || []).map((x, i) => (
-                  <img key={i} src={x.url} alt={x.name} />
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={x.url} alt={x.name} />
+                    <button
+                      className="btn-delete-thumb"
+                      onClick={() =>
+                        setAtt({ ...att, fotoSurvey: att.fotoSurvey.filter((_, idx) => idx !== i) })
+                      }
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
           </div>
-            <div style={{ marginTop: 10 }}>
+
+          {/* MAP SCREENSHOT */}
+          <div style={{ marginTop: 10 }}>
             <label className="label">SS Peta / Map</label>
             <input
               type="file"
@@ -649,15 +689,18 @@
                 const f = e.target.files?.[0];
                 if (!f) return;
                 const url = await fileToDataURL(f);
-                setAtt({ mapSS: { name: f.name, file: f, url } });
+                setAtt({ ...att, mapSS: { name: f.name, file: f, url } });
               }}
             />
             {att.mapSS?.url && (
               <div className="thumbs" style={{ marginTop: 8 }}>
                 <img src={att.mapSS.url} alt="SS Map" />
+                <button onClick={() => setAtt({ ...att, mapSS: null })} className="btn-delete">Hapus</button>
               </div>
             )}
           </div>
+
+          {/* BARCODE */}
           <div style={{ marginTop: 10 }}>
             <label className="label">Barcode / QR</label>
             <input
@@ -667,15 +710,18 @@
                 const f = e.target.files?.[0];
                 if (!f) return;
                 const url = await fileToDataURL(f);
-                setAtt({ barcode: { name: f.name, file: f, url } });
+                setAtt({ ...att, barcode: { name: f.name, file: f, url } });
               }}
             />
             {att.barcode?.url && (
               <div className="thumbs" style={{ marginTop: 8 }}>
                 <img src={att.barcode.url} alt="Barcode/QR" />
+                <button onClick={() => setAtt({ ...att, barcode: null })} className="btn-delete">Hapus</button>
               </div>
             )}
           </div>
+
+          {/* TTD PETUGAS */}
           <div style={{ marginTop: 10 }}>
             <label className="label">TTD Petugas (PNG, latar transparan disarankan)</label>
             <input
@@ -689,12 +735,13 @@
                   return;
                 }
                 const url = await fileToDataURL(f);
-                setAtt({ petugasTtd: { name: f.name, file: f, url } });
+                setAtt({ ...att, petugasTtd: { name: f.name, file: f, url } });
               }}
             />
             {att.petugasTtd?.url && (
               <div className="ttd-preview">
                 <img src={att.petugasTtd.url} alt="TTD Petugas" />
+                <button onClick={() => setAtt({ ...att, petugasTtd: null })} className="btn-delete">Hapus</button>
               </div>
             )}
           </div>
@@ -1054,5 +1101,104 @@
   @media (max-width:360px){
     .input,.select,.textarea{ padding:11px 12px }
   }
+/* === Kawaii delete button di BAWAH gambar === */
+
+/* susun setiap thumb jadi kolom: gambar di atas, tombol di bawah */
+.thumbs > div{
+  position: static !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+}
+
+/* tombol mungil, pastel, pill */
+.btn-delete-thumb{
+  position: static;                 /* bukan overlay */
+  top: auto; right: auto;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 2px solid #F3B6B2;
+  background: linear-gradient(180deg, #FFDDE2, #FFC6CF);
+  color: #4b0f1a;                   /* maroon manis */
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+
+  box-shadow:
+    0 8px 18px rgba(243, 182, 178, .35),
+    inset 0 1px 0 rgba(255,255,255,.65);
+  transform: translateZ(0);
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+
+/* tombolnya semula berisi "✕". kita sembunyikan visualnya
+   dan ganti dengan ikon + teks via pseudo-element */
+.btn-delete-thumb{
+  font-size: 0;                     /* sembunyikan "✕" visual */
+}
+.btn-delete-thumb::before{
+  content: "🩷 Hapus";
+  font-size: 12px;                  /* teks balik normal */
+}
+
+/* interaksi manis */
+.btn-delete-thumb:hover{
+  transform: translateY(-1px);
+  box-shadow:
+    0 12px 24px rgba(243, 182, 178, .42),
+    inset 0 1px 0 rgba(255,255,255,.7);
+}
+.btn-delete-thumb:active{
+  transform: translateY(0);
+  filter: brightness(.97);
+}
+.btn-delete-thumb:focus-visible{
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(247, 199, 196, .55);
+}
+
+/* aksesibilitas: kurangi animasi kalau user minta */
+@media (prefers-reduced-motion: reduce){
+  .btn-delete-thumb{ transition: none }
+}
+
+/* === versi serasi untuk tombol Hapus (file tunggal: KTP, KK, dll) === */
+.btn-delete{
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 2px solid #F3B6B2;
+  background: linear-gradient(180deg, #FFDDE2, #FFC6CF);
+  color: #4b0f1a;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+
+  box-shadow:
+    0 8px 18px rgba(243, 182, 178, .35),
+    inset 0 1px 0 rgba(255,255,255,.65);
+  transform: translateZ(0);
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.btn-delete::before{
+  content: "🗑️";
+  font-size: 14px;
+}
+.btn-delete:hover{ transform: translateY(-1px) }
+.btn-delete:active{ transform: translateY(0); filter: brightness(.97) }
+.btn-delete:focus-visible{ outline: 0; box-shadow: 0 0 0 3px rgba(247,199,196,.55) }
   `;
 

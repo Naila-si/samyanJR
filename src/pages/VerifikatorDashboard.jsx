@@ -5,6 +5,294 @@ import { PDFDocument, rgb } from "pdf-lib";
 import JsBarcode from "jsbarcode";
 import { supabase } from "../lib/supabaseClient";
 
+const detectVariant = (d) => {
+  const t = (d.template || "").toLowerCase();
+  const s = (d.jenisSurvei || d.jenisSurveyLabel || d.sifatCidera || "").toLowerCase();
+  if (t.includes("kunjungan")) return "rs";
+  if (t.includes("survei_md") || s.includes("meninggal")) return "md";
+  if (t.includes("survei_ll") || s.includes("luka")) return "ll";
+  return "ll";
+};
+
+const TABLE_BY_VARIANT = {
+  rs: "form_kunjungan_rs",
+  md: "form_survei_aw", // MD & LL sama-sama di tabel ini
+  ll: "form_survei_aw",
+};
+
+async function fetchDetailFromSupabase(rec) {
+  const variant = detectVariant(rec);
+  const table = TABLE_BY_VARIANT[variant];
+
+  // Bangun OR filter dari key yang bener-bener ADA di tabel varian
+  const ors = [];
+  // umum
+  if (rec.id)         ors.push(`id.eq.${rec.id}`);
+  if (rec.noPL)       ors.push(`no_pl.eq.${rec.noPL}`);
+
+  // khusus RS (berdasarkan hasil query & screenshot-mu)
+  if (variant === "rs") {
+    if (rec.local_id) ors.push(`local_id.eq.${rec.local_id}`);
+    if (rec.korban)   ors.push(`korban.eq.${rec.korban}`);
+    // no_pl biasanya tidak ada di RS, tapi ga masalah jika ikut (akan diabaikan jika null)
+  } else {
+    // survei_aw (MD/LL) pakai nama_korban
+    if (rec.korban)   ors.push(`nama_korban.eq.${rec.korban}`);
+  }
+
+  if (ors.length === 0) {
+    return { variant, table, row: null };
+  }
+
+  const { data, error } = await supabase
+    .from(table)
+    .select("*")
+    .or(ors.join(","))
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.warn(`[detail] fetch ${table} gagal:`, error.message || error);
+    return { variant, table, row: null };
+  }
+  return { variant, table, row: (data && data[0]) || null };
+}
+
+function normalizeDetailRow(variant, row) {
+  if (!row) return {};
+
+  const parseMaybe = (v) => {
+    if (!v) return null;
+    if (typeof v === "object") return v;
+    try { return JSON.parse(v); } catch { return null; }
+  };
+
+  const base = {
+    id: row.local_id ?? row.id ?? row.uuid ?? null,
+    createdAt: row.created_at ?? row.waktu ?? null,
+    waktu: row.waktu ?? row.created_at ?? null,
+
+    template:
+      row.template ??
+      (variant === "rs"
+        ? "kunjungan_rs"
+        : (row.jenis_survei
+            ? `survei_${String(row.jenis_survei).toLowerCase().includes("meninggal") ? "md" : "ll"}`
+            : "")),
+
+    // umum
+    korban: row.korban ?? row.nama_korban ?? null,
+    petugas: row.petugas ?? row.petugas_survei ?? null,
+    jenisSurvei: row.jenis_survei ?? row.jenisSurvei ?? null,
+    jenisSurveyLabel: row.jenis_survei_label ?? row.jenisSurveyLabel ?? row.jenis_survei ?? null,
+    noPL: row.no_pl ?? row.noPL ?? null,
+    hubunganSesuai: row.hubungan_sesuai ?? null,
+    sumbers: parseMaybe(row.sumbers) ?? row.sumbers ?? [],
+    uraian: row.uraian ?? null,
+
+    tanggalKecelakaan: row.tanggal_kecelakaan ?? row.tanggalkecelakaan ?? row.tgl_kecelakaan ?? null,
+    tglKecelakaan: row.tgl_kecelakaan ?? row.tanggal_kecelakaan ?? null,
+    hariTanggal: row.hari_tanggal ?? row.hariTanggal ?? null,
+
+    noBerkas: row.no_berkas ?? null,
+    alamatKorban: row.alamat_korban ?? null,
+    tempatKecelakaan: row.tempat_kecelakaan ?? row.lokasi_kecelakaan ?? null,
+
+    status: row.status ?? "terkirim",
+    verified: !!row.verified,
+    verifiedAt: row.verified_at ?? null,
+    verifyNote: row.verify_note ?? null,
+    verifyChecklist: parseMaybe(row.verify_checklist) ?? row.verify_checklist ?? null,
+    unverifiedAt: row.unverified_at ?? null,
+    unverifyNote: row.unverify_note ?? null,
+    rejectedAt: row.rejected_at ?? null,
+    rejectNote: row.reject_note ?? null,
+    finishedAt: row.finished_at ?? null,
+    finishNote: row.finish_note ?? null,
+
+    rating: row.rating ?? row.rating_value ?? null,
+    feedback: row.feedback ?? row.feedback_text ?? null,
+  };
+
+  if (variant === "rs") {
+    Object.assign(base, {
+      // sesuai kolom yang kamu tunjukkan di screenshot RS:
+      wilayah: row.wilayah ?? null,
+      lokasiKecelakaan: row.lokasi_kecelakaan ?? row.tempat_kecelakaan ?? null,
+      rumahSakit: row.rumah_sakit ?? row.nama_rs ?? null,
+      tglMasukRS: row.tgl_masuk_rs ?? row.tanggal_masuk_rs ?? null,
+      tglJamNotifikasi: row.tgl_jam_notifikasi ?? null,
+      tglJamKunjungan: row.tgl_jam_kunjungan ?? null,
+      uraianKunjungan: row.uraian_kunjungan ?? row.uraian ?? null,
+      rekomendasi: row.rekomendasi ?? null,
+
+      // tambahan yang kelihatan ada di tabel RS-mu:
+      petugasJabatan: row.petugas_jabatan ?? null,
+      petugasTtd: row.petugas_ttd ?? null,
+    });
+
+    // foto survey di RS: kolomnya `foto_survey` (array/json)
+    base.fotoSurveyList = parseMaybe(row.foto_survey) ?? row.foto_survey ?? [];
+  }
+
+  // lampiran umum/fallback lain
+  base.attachSurvey =
+    parseMaybe(row.attach_survey) ??
+    parseMaybe(row.attachSurvey) ??
+    parseMaybe(row.att) ??
+    parseMaybe(row.attachments) ??
+    row.attachSurvey ?? row.attach_survey ?? row.att ?? row.attachments ?? {};
+
+  // list foto lain (kalau ada di kolom berbeda)
+  base.rsList   = parseMaybe(row.rs_list)   ?? row.rs_list   ?? [];
+  base.fotoList = parseMaybe(row.foto_list) ?? row.foto_list ?? [];
+
+  return base;
+}
+
+async function syncVerificationToSupabase(rec, payload) {
+  const TABLES = ["dataform"];
+  const nowIso = new Date().toISOString();
+
+  const toTs = (v) => (v ? new Date(v).toISOString() : null);          
+  const toDate = (v) => {                                               
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d) ? null : d.toISOString().slice(0, 10);
+  };
+  const toInt = (v) => (v == null || isNaN(+v) ? null : parseInt(v, 10));
+  const toBool = (v) => (v === true || v === false ? v : null);
+  const toJSON = (v) => {
+    if (v == null) return null;
+    if (typeof v === "object") return v;
+    try { return JSON.parse(v); } catch { return null; }
+  };
+
+  let updates;
+  switch (payload.action) {
+    case "verify":
+      updates = {
+        verified: true,
+        verified_at: toTs(payload.timestamp),
+        verify_note: payload.note || null,
+        verify_checklist: toJSON(payload.checks),
+        status: "diproses",
+        updated_at: nowIso,
+      };
+      break;
+    case "unverify":
+      updates = {
+        verified: false,
+        unverified_at: toTs(payload.timestamp),
+        unverify_note: payload.note || null,
+        status: "terkirim",
+        updated_at: nowIso,
+      };
+      break;
+    case "finish":
+      updates = {
+        finished_at: toTs(payload.timestamp),
+        finish_note: payload.note || null,
+        status: "selesai",
+        updated_at: nowIso,
+      };
+      break;
+    case "reject":
+      updates = {
+        verified: false,
+        rejected_at: toTs(payload.timestamp),
+        reject_note: payload.note || null,
+        status: "ditolak",
+        updated_at: nowIso,
+      };
+      break;
+    default:
+      updates = { updated_at: nowIso };
+  }
+
+  try {
+    const { data, error } = await supabase.rpc("apply_verification", {
+      p_action: payload.action,
+      p_local_id: rec.id ?? null,
+      p_note: payload.note ?? null,
+      p_checklist: payload.checks ?? null,
+    });
+    if (error) throw error;
+    console.log("✅ RPC apply_verification OK:", data);
+    return data;
+  } catch (e) {
+    console.warn("↪️ RPC skip:", e?.message || e);
+  }
+
+  const updateByLocalId = async (table) =>
+    await supabase
+      .from(table)
+      .update(updates)
+      .eq("local_id", rec.id)
+      .select("id, local_id");
+
+  const upsertByLocalId = async (table) => {
+    const counts = toJSON(rec.counts) || {};
+    const files = toJSON(rec.files) || rec.files || null;
+    const totalFiles =
+      toInt(rec.totalFiles) ??
+      (Array.isArray(rec.files) ? rec.files.length : null);
+
+    const row = {
+      local_id: String(rec.id),
+      waktu: toTs(rec.waktu || rec.createdAt || nowIso),            
+      template: rec.template ?? null,                                
+      jenisSurvei: rec.jenisSurvei ?? null,                          
+      jenisSurveyLabel: rec.jenisSurveyLabel ?? null,                
+      noPL: rec.noPL ?? null,                                        
+      korban: rec.korban ?? null,                                    
+      petugas: rec.petugas ?? null,                                  
+      tanggalKecelakaan: toDate(rec.tanggalKecelakaan || rec.tglKecelakaan), 
+      status: updates.status ?? rec.status ?? "terkirim",
+      rating: toInt(rec.rating),
+      feedback: rec.feedback ?? null,
+      verified: toBool(rec.verified) ?? false,
+      verified_at: rec.verifiedAt ? toTs(rec.verifiedAt) : updates.verified_at ?? null,
+      verify_note: rec.verifyNote ?? updates.verify_note ?? null,
+      verify_checklist: toJSON(rec.verifyChecklist) ?? updates.verify_checklist ?? null,
+      unverified_at: rec.unverifiedAt ? toTs(rec.unverifiedAt) : updates.unverified_at ?? null,
+      unverify_note: rec.unverifyNote ?? updates.unverify_note ?? null,
+      finished_at: rec.finishedAt ? toTs(rec.finishedAt) : updates.finished_at ?? null,
+      finish_note: rec.finishNote ?? updates.finish_note ?? null,
+      rejected_at: rec.rejectedAt ? toTs(rec.rejectedAt) : updates.rejected_at ?? null,
+      reject_note: rec.rejectNote ?? updates.reject_note ?? null,
+      totalFiles,
+      counts: Object.keys(counts).length ? counts : null,           
+      files: files ?? null,                                         
+      createdAt: toTs(rec.createdAt || rec.waktu || nowIso),         
+      updated_at: nowIso,                                            
+      ownerId: rec.ownerId ?? null,                                  
+    };
+
+    Object.keys(row).forEach((k) => row[k] === undefined && delete row[k]);
+
+    return await supabase
+      .from(table)
+      .upsert(row, { onConflict: "local_id" })
+      .select("id, local_id");
+  };
+
+  for (const t of TABLES) {
+    const { data, error } = await updateByLocalId(t);
+    if (error) { console.warn(`⚠️ Update ${t} error:`, error); continue; }
+    if (data && data.length) { console.log(`✅ Update OK di ${t}`, data); return data; }
+  }
+
+  for (const t of TABLES) {
+    const { data, error } = await upsertByLocalId(t);
+    if (error) { console.warn(`⚠️ Upsert ${t} error:`, error); continue; }
+    if (data && data.length) { console.log(`✅ Upsert OK di ${t}`, data); return data; }
+  }
+
+  console.error("❌ Gagal simpan verifikasi (update & upsert gagal).");
+  return null;
+}
+
   async function buildPreviewHTML_MD(vv, objURL) {
     const escapeHtml = (str = "") =>
       String(str)
@@ -174,21 +462,19 @@ import { supabase } from "../lib/supabaseClient";
       </p>
 
       <div class="signs">
-      <div>
-        <div class="lbl">Mengetahui,</div>
-        ${vv.__showTtd
-          ? `<img src="${vv.__ttdUrl}" alt="TTD Andi" style="height:28mm;object-fit:contain;margin:4mm 0;"/>`
-          : `<div class="space"></div>`}
-        <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
-        <div>${escapeHtml("Kepala Bagian Operasional")}</div>
+        <div>
+          <div class="lbl">Mengetahui,</div>
+          <div class="space"></div>
+          <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
+          <div>${escapeHtml("Kepala Bagian Operasional")}</div>
+        </div>
+        <div>
+          <div class="lbl">Petugas Survei,</div>
+          <div class="space"></div>
+          <div class="name">${escapeHtml(vv.petugasSurvei || vv.petugas || "........................................")}</div>
+          <div>${escapeHtml(vv.petugasJabatan || "")}</div>
+        </div>
       </div>
-      <div>
-        <div class="lbl">Petugas Survei,</div>
-        <div class="space"></div>
-        <div class="name">${escapeHtml(vv.petugasSurvei || vv.petugas || "........................................")}</div>
-        <div>${escapeHtml(vv.petugasJabatan || "")}</div>
-      </div>
-    </div>
 
       ${filePages.join("")}
     </body>
@@ -282,10 +568,7 @@ import { supabase } from "../lib/supabaseClient";
         : `<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>`;
 
     // HTML utama (mirror gaya Step4, versi LL)
-    return `<!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="utf-8"/>
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
     <style>
       @page { size: A4; margin: 12mm; }
       body{ -webkit-print-color-adjust: exact; print-color-adjust: exact; margin:0;
@@ -343,21 +626,19 @@ import { supabase } from "../lib/supabaseClient";
       </p>
 
       <div class="signs">
-      <div>
-        <div class="lbl">Mengetahui,</div>
-        ${vv.__showTtd
-          ? `<img src="${vv.__ttdUrl}" alt="TTD Andi" style="height:28mm;object-fit:contain;margin:4mm 0;"/>`
-          : `<div class="space"></div>`}
-        <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
-        <div>${escapeHtml("Kepala Bagian Operasional")}</div>
+        <div>
+          <div class="lbl">Mengetahui,</div>
+          <div class="space"></div>
+          <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
+          <div>${escapeHtml("Kepala Bagian Operasional")}</div>
+        </div>
+        <div>
+          <div class="lbl">Petugas Survei,</div>
+          <div class="space"></div>
+          <div class="name">${escapeHtml(vv.petugas || "........................................")}</div>
+          <div>${escapeHtml(vv.petugasJabatan || "")}</div>
+        </div>
       </div>
-      <div>
-        <div class="lbl">Petugas Survei,</div>
-        <div class="space"></div>
-        <div class="name">${escapeHtml(vv.petugas || "........................................")}</div>
-        <div>${escapeHtml(vv.petugasJabatan || "")}</div>
-      </div>
-    </div>
 
       <div class="foto-container">${imgsHTML || "<i>Tidak ada foto dilampirkan.</i>"}</div>
     </body></html>`;
@@ -372,16 +653,6 @@ import { supabase } from "../lib/supabaseClient";
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
-    const fmtDate = (d) => {
-      if (!d) return "-";
-      try {
-        const date = new Date(d);
-        if (isNaN(date.getTime())) return d;
-        return date.toLocaleDateString("id-ID", { day:"2-digit", month:"long", year:"numeric" });
-      } catch { return d; }
-    };
-
-    // Kumpulkan foto dari beberapa kemungkinan field (tanpa konversi async)
     const fotoCandidates =
       (Array.isArray(vv.allPhotos) && vv.allPhotos) ||
       (Array.isArray(vv.fotoList) && vv.fotoList) ||
@@ -419,7 +690,6 @@ import { supabase } from "../lib/supabaseClient";
           .join("")
       : "<i>Tidak ada foto dilampirkan.</i>";
 
-    // ✅ siapkan src ttd petugas kalau ada (opsional)
     const petugasSrc = (() => {
       const t = vv.petugasTtd;
       if (!t) return null;
@@ -432,216 +702,193 @@ import { supabase } from "../lib/supabaseClient";
     })();
 
     return `<!DOCTYPE html>
-    <html lang="id">
-    <head>
-      <meta charset="UTF-8" />
-      <title>Laporan Kunjungan RS - ${escapeHtml(vv.korban || "Anon")}</title>
-      <style>
-        @page { size: A4; margin: 12mm; }
-        body { font-family:"Times New Roman", serif; color:#000; background:#fff; padding:40px 50px; line-height:1.6; }
-        h2 { text-align:center; text-transform:uppercase; font-size:18px; font-weight:bold; margin-bottom:0; }
-        h3 { text-align:center; margin-top:4px; font-size:14px; font-weight:normal; }
-        table { width:100%; border-collapse:collapse; margin-top:20px; font-size:14px; }
-        td { padding:4px 6px; vertical-align:top; }
-        .label { width:220px; font-weight:bold; }
-        .section-title { font-weight:bold; margin-top:20px; text-transform:uppercase; }
-        .box { border:1px solid #000; padding:10px; margin-top:6px; min-height:60px; white-space:pre-wrap; }
-        .ttd { display:flex; justify-content:space-between; margin-top:60px; font-size:14px; text-align:center; }
-        .foto-container { display:flex; flex-wrap:wrap; margin-top:30px; gap:10px; }
-        .footer-note { margin-top:30px; font-size:14px; text-align:justify; }
-      </style>
-    </head>
-    <body>
-      <h2>LEMBAR HASIL KUNJUNGAN KE RUMAH SAKIT</h2>
-      <h3>APLIKASI MOBILE PELAYANAN</h3>
+  <html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Laporan Kunjungan RS - ${escapeHtml(vv.korban || "Anon")}</title>
+    <style>
+      @page { size: A4; margin: 12mm; }
+      body { font-family:"Times New Roman", serif; color:#000; background:#fff; padding:40px 50px; line-height:1.6; }
+      h2 { text-align:center; text-transform:uppercase; font-size:18px; font-weight:bold; margin-bottom:0; }
+      h3 { text-align:center; margin-top:4px; font-size:14px; font-weight:normal; }
+      table { width:100%; border-collapse:collapse; margin-top:20px; font-size:14px; }
+      td { padding:4px 6px; vertical-align:top; }
+      .label { width:220px; font-weight:bold; }
+      .section-title { font-weight:bold; margin-top:20px; text-transform:uppercase; }
+      .box { border:1px solid #000; padding:10px; margin-top:6px; min-height:60px; white-space:pre-wrap; }
+      .ttd { display:flex; justify-content:space-between; margin-top:60px; font-size:14px; text-align:center; }
+      .foto-container { display:flex; flex-wrap:wrap; margin-top:30px; gap:10px; }
+      .footer-note { margin-top:30px; font-size:14px; text-align:justify; }
+    </style>
+  </head>
+  <body>
+    <h2>LEMBAR HASIL KUNJUNGAN KE RUMAH SAKIT</h2>
+    <h3>APLIKASI MOBILE PELAYANAN</h3>
 
-      <table>
-        <tr><td class="label">NPP / Nama Petugas</td><td>: ${escapeHtml(vv.petugas || "-")}</td></tr>
-        <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${escapeHtml(vv.wilayah || "-")}</td></tr>
-        <tr><td class="label">Nama Korban</td><td>: ${escapeHtml(vv.korban || "-")}</td></tr>
-        <!-- ✅ pakai fallback lokasi + format tanggal -->
-        <tr><td class="label">Lokasi Kecelakaan</td><td>: ${escapeHtml(vv.tempatKecelakaan || vv.lokasiKecelakaan || "-")}</td></tr>
-        <tr><td class="label">Kode RS / Nama RS</td><td>: ${escapeHtml(vv.rumahSakit || "-")}</td></tr>
-        <tr><td class="label">Tanggal Kecelakaan</td><td>: ${escapeHtml(fmtDate(vv.tglKecelakaan) || "-")}</td></tr>
-        <tr><td class="label">Tanggal Masuk RS</td><td>: ${escapeHtml(fmtDate(vv.tglMasukRS) || "-")}</td></tr>
-        <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${escapeHtml(vv.tglJamNotifikasi || "-")}</td></tr>
-        <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${escapeHtml(vv.tglJamKunjungan || "-")}</td></tr>
-      </table>
+    <table>
+      <tr><td class="label">NPP / Nama Petugas</td><td>: ${escapeHtml(vv.petugas || "-")}</td></tr>
+      <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${escapeHtml(vv.wilayah || "-")}</td></tr>
+      <tr><td class="label">Nama Korban</td><td>: ${escapeHtml(vv.korban || "-")}</td></tr>
+      <tr><td class="label">Lokasi Kecelakaan</td><td>: ${escapeHtml(vv.lokasiKecelakaan || "-")}</td></tr>
+      <tr><td class="label">Kode RS / Nama RS</td><td>: ${escapeHtml(vv.rumahSakit || "-")}</td></tr>
+      <tr><td class="label">Tanggal Kecelakaan</td><td>: ${escapeHtml(vv.tglKecelakaan || "-")}</td></tr>
+      <tr><td class="label">Tanggal Masuk RS</td><td>: ${escapeHtml(vv.tglMasukRS || "-")}</td></tr>
+      <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${escapeHtml(vv.tglJamNotifikasi || "-")}</td></tr>
+      <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${escapeHtml(vv.tglJamKunjungan || "-")}</td></tr>
+    </table>
 
-      <div class="section-title">Uraian Hasil Kunjungan:</div>
-      <div class="box">${escapeHtml(vv.uraianKunjungan || "") || "<i>Belum diisi.</i>"}</div>
+    <div class="section-title">Uraian Hasil Kunjungan:</div>
+    <div class="box">${escapeHtml(vv.uraianKunjungan || "") || "<i>Belum diisi.</i>"}</div>
 
-      <div class="section-title">Rekomendasi / Kesimpulan:</div>
-      <div class="box">${escapeHtml(vv.rekomendasi || "") || "<i>Belum diisi.</i>"}</div>
+    <div class="section-title">Rekomendasi / Kesimpulan:</div>
+    <div class="box">${escapeHtml(vv.rekomendasi || "") || "<i>Belum diisi.</i>"}</div>
 
-      <div class="footer-note">
-        Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
+    <div class="footer-note">
+      Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
+    </div>
+
+    <div class="ttd">
+      <div>
+        Mengetahui,<br/><br/><br/><br/>
+        <b>Andi Raharja, S.A.B</b><br/>
+        <i>Kepala Bagian Operasional</i>
       </div>
-
-      <div class="ttd">
-        <div>
-          Mengetahui,<br/>
-          ${vv.__showTtd
-            ? `<img src="${vv.__ttdUrl}" alt="TTD Pejabat" style="height:28mm;object-fit:contain;margin:8mm 0; display:block;"/>`
-            : `<br/><br/><br/><br/>`}
-          <b>Andi Raharja, S.A.B</b><br/>
-          <i>Kepala Bagian Operasional</i>
-        </div>
-        <div>
-          Petugas yang melakukan kunjungan,<br/><br/>
-          ${petugasSrc ? `<img src="${petugasSrc}" alt="TTD Petugas" style="max-height:28mm; object-fit:contain; display:block; margin:8mm auto;"/>`
-                        : `<br/><br/><br/><br/>`}
-          <b>${escapeHtml(vv.petugas || "................................")}</b><br/>
-          <i>${escapeHtml(vv.petugasJabatan || "")}</i>
-        </div>
+      <div>
+        Petugas yang melakukan kunjungan,<br/><br/>
+        ${petugasSrc
+          ? `<img src="${petugasSrc}" alt="TTD Petugas" style="max-height:80px; display:block; margin:4px auto;"/>`
+          : "<br/><br/><br/>"}
+        <b>${escapeHtml(vv.petugas || "................................")}</b><br/>
+        <i>${escapeHtml(vv.petugasJabatan || "")}</i>
       </div>
+    </div>
 
-      <div class="foto-container">${fotosHTML}</div>
-    </body>
-    </html>`;
+    <div class="foto-container">${fotosHTML}</div>
+  </body>
+  </html>`;
   }
-
 
   async function prepareForOutput(rec) {
     const vv = { ...rec };
 
-    // cari key di object (nested), case-insensitive, normalisasi snake/camel
-    const norm = (s) => String(s || "").toLowerCase().replace(/[_\s-]/g, "");
-    function deepPick(obj, aliases) {
-      if (!obj || typeof obj !== "object") return "";
-      const want = new Set(aliases.map(norm));
-      const stack = [{ o: obj }];
-      while (stack.length) {
-        const { o } = stack.pop();
-        if (!o || typeof o !== "object") continue;
-        for (const k of Object.keys(o)) {
-          const v = o[k];
-          if (want.has(norm(k))) {
-            if (v !== undefined && v !== null && (typeof v !== "string" || v.trim() !== "")) {
-              return v;
-            }
+    // --- ID & waktu aman ---
+    vv.id =
+      rec.id ||
+      rec.local_id ||
+      rec.row_id ||
+      rec.uuid ||
+      `${rec.waktu || rec.created_at || Date.now()}__${rec.no_pl || rec.noPL || "nop"}__${rec.template || "tpl"}`;
+
+    vv.createdAt = rec.createdAt || rec.waktu || rec.created_at || new Date().toISOString();
+    vv.waktu     = rec.waktu     || vv.createdAt;
+
+    // --- Template & label ---
+    const tpl = (rec.template || "").toLowerCase();
+    vv.template = rec.template || "";
+    vv.jenisSurveyLabel =
+      rec.jenisSurveyLabel ||
+      rec.jenis_survey_label ||
+      rec.jenisSurvei ||
+      rec.jenis_survei ||
+      rec.sifatCidera ||
+      "";
+
+    vv.jenisSurvei =
+      rec.jenisSurvei ||
+      rec.jenis_survei ||
+      (tpl.includes("survei_md") ? "Meninggal Dunia" :
+      tpl.includes("survei_ll") ? "Luka-luka" : "");
+
+    // --- Data umum / identitas ---
+    vv.petugas     = rec.petugas || rec.petugasSurvei || "";
+    vv.petugasSurvei = rec.petugasSurvei || rec.petugas || "";
+    vv.korban      = rec.korban || rec.namaKorban || "";
+    vv.namaKorban  = rec.namaKorban || rec.korban || "";
+    vv.noPL        = rec.noPL || rec.no_pl || "";
+    vv.noBerkas    = rec.noBerkas || "";
+    vv.alamatKorban= rec.alamatKorban || "";
+    vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
+    vv.wilayah     = rec.wilayah || "";
+    vv.rumahSakit  = rec.rumahSakit || "";
+
+    // 🔎 ambil container lampiran dari beberapa kemungkinan kolom
+    const att =
+      rec.attachSurvey ||
+      rec.attach_survey ||
+      rec.att ||
+      rec.attachments ||
+      {};
+
+    // helper: ambil string/obj file pertama yang valid (boleh nested/array)
+    function pickFileLike(...cands) {
+      for (const c of cands) {
+        if (!c) continue;
+        if (typeof c === "string" && c.trim()) return c;
+        if (Array.isArray(c)) {
+          const r = pickFileLike(...c);
+          if (r) return r;
+          continue;
+        }
+        if (typeof c === "object") {
+          // format umum
+          if (c.dataURL || c.url || c.path) return c;
+          // kadang di c.file (File atau objek file-like)
+          if (c.file) {
+            if (typeof c.file === "string") return c.file;
+            if (c.file.dataURL || c.file.url || c.file.path) return c.file;
+            return c.file; // biarin object, nanti builder handle via objURL
           }
-          if (v && typeof v === "object") stack.push({ o: v });
         }
       }
       return "";
     }
 
-    // --- helper kecil ---
-    const coalesce = (...xs) => xs.find(v => v !== undefined && v !== null && String(v).trim() !== "") ?? "";
-    const asArr = (x) => Array.isArray(x) ? x : (x ? [x] : []);
-    const toISOish = (d) => {
-      // Terima "YYYY-MM-DD", "DD/MM/YYYY", "DD-MM-YYYY", timestamp/Date, dll
-      if (!d) return "";
-      if (d instanceof Date) return d.toISOString();
-      if (/^\d{4}-\d{2}-\d{2}/.test(d)) return d;                // YYYY-MM-DD
-      const m1 = /^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/.exec(d);  // DD/MM/YYYY atau DD-MM-YYYY
-      if (m1) {
-        const [_, dd, mm, yyyy] = m1;
-        return `${yyyy}-${mm}-${dd}`;
-      }
-      // biarkan Date mencoba
-      const t = new Date(d);
-      return isNaN(t.getTime()) ? "" : t.toISOString();
-    };
+    // kandidat key yang sering muncul
+    const fallbackTtd =
+      rec.petugasTtd ||
+      rec.petugas_ttd ||
+      att.petugasTtd ||
+      att.petugas_ttd ||
+      att.ttdPetugas ||
+      att.signaturePetugas ||
+      "";
 
-    // --- ID & waktu aman ---
-    vv.id =
-      rec.id || rec.local_id || rec.row_id || rec.uuid ||
-      `${coalesce(rec.waktu, rec.created_at, Date.now())}__${coalesce(rec.no_pl, rec.noPL, "nop")}__${coalesce(rec.template, "tpl")}`;
+    vv.petugasTtd = fallbackTtd || "";
 
-    vv.createdAt = coalesce(rec.createdAt, rec.waktu, rec.created_at, new Date().toISOString());
-    vv.waktu     = coalesce(rec.waktu, vv.createdAt);
+    console.log("🧾 attachSurvey keys:", att && typeof att === "object" ? Object.keys(att) : att);
+    console.log("🖋️ Debug TTD petugas:", {
+      rec_petugasTtd: rec.petugasTtd,
+      att_petugasTtd: att.petugasTtd || att.petugas_ttd,
+      att_ttdPetugas: att.ttdPetugas || att.ttd_petugas,
+      att_signature: att.signaturePetugas || att.signature_petugas || att.signature,
+      final_vv_petugasTtd: vv.petugasTtd,
+    });
 
-    // --- Template & label ---
-    const tpl = (rec.template || "").toLowerCase();
-    vv.template = coalesce(rec.template);
-    vv.jenisSurveyLabel = coalesce(
-      rec.jenisSurveyLabel, rec.jenis_survey_label, rec.jenisSurvei, rec.jenis_survei, rec.sifatCidera
-    );
-    vv.jenisSurvei = coalesce(
-      rec.jenisSurvei, rec.jenis_survei,
-      tpl.includes("survei_md") ? "Meninggal Dunia" : "",
-      tpl.includes("survei_ll") ? "Luka-luka"       : ""
-    );
+    // --- Tanggal-tanggal ---
+    vv.tglKecelakaan =
+      rec.tglKecelakaan ||
+      rec.tanggalKecelakaan ||
+      rec.tgl_kecelakaan ||
+      "";
 
-    // --- Data umum / identitas (dengan alias umum) ---
-    vv.petugas        = coalesce(rec.petugas, rec.petugasSurvei, rec.petugas_survei);
-    vv.petugasSurvei  = coalesce(rec.petugasSurvei, rec.petugas, rec.petugas_survei);
-    vv.korban         = coalesce(rec.korban, rec.namaKorban, rec.nama_korban);
-    vv.namaKorban     = coalesce(rec.namaKorban, rec.korban, rec.nama_korban);
-    vv.noPL           = coalesce(rec.noPL, rec.no_pl);
-    vv.noBerkas       = coalesce(rec.noBerkas, rec.no_berkas);
-    vv.alamatKorban   = coalesce(rec.alamatKorban, rec.alamat_korban, rec.alamat);
-    vv.tempatKecelakaan = coalesce(
-      rec.tempatKecelakaan, rec.lokasiKecelakaan, rec.lokasi_kecelakaan,
-      rec.lokasiKejadian, rec.lokasi_kejadian, rec.tempat_kejadian,
-      rec.lokasi, rec.tempat
-    );
-    const lokasiA = coalesce(
-      rec.tempatKecelakaan, rec.lokasiKecelakaan, rec.lokasi_kecelakaan,
-      rec.lokasiKejadian, rec.lokasi_kejadian, rec.tempat_kejadian,
-      rec.lokasi, rec.tempat
-    );
-    const lokasiB = deepPick(rec, [
-      "tempatKecelakaan","lokasiKecelakaan","lokasi_kecelakaan",
-      "lokasiKejadian","lokasi_kejadian","tempat_kejadian",
-      "lokasi","tempat"
-    ]);
-    vv.tempatKecelakaan = coalesce(lokasiA, lokasiB);
+    vv.hariTanggal =
+      rec.hariTanggal ||
+      rec.tanggalKecelakaan ||
+      vv.tglKecelakaan ||
+      "";
 
-    vv.lokasiKecelakaan = coalesce(rec.lokasiKecelakaan, rec.lokasi_kecelakaan, vv.tempatKecelakaan);
+    vv.tglMasukRS       = rec.tglMasukRS || "";
+    vv.tglJamNotifikasi = rec.tglJamNotifikasi || "";
+    vv.tglJamKunjungan  = rec.tglJamKunjungan || "";
 
-    // ✅ wilayah: tambah fallback alias umum
-    vv.wilayah = coalesce(
-      rec.wilayah,
-      rec.loket, rec.loketKantor, rec.loket_wilayah, rec.loket_kantor,
-      rec.kantorWilayah, rec.kantor_wilayah,
-      deepPick(rec, ["wilayah","loket","loketKantor","kantorWilayah","loket_wilayah","loket_kantor","kantor_wilayah"])
-    );
+    // --- Konten narasi (survey & kunjungan) ---
+    vv.uraian       = rec.uraianSurvei || rec.uraian || "";
+    vv.kesimpulan   = rec.kesimpulanSurvei || rec.kesimpulan || "";
+    vv.uraianKunjungan = rec.uraianKunjungan || "";
+    vv.rekomendasi  = rec.rekomendasi || "";
 
-    vv.rumahSakit = coalesce(
-      rec.rumahSakit, rec.namaRS, rec.kodeRS, rec.rs,
-      rec.nama_rs, rec.kode_rs, rec.rsNama, rec.rs_nama,
-      deepPick(rec, ["rumahSakit","namaRS","kodeRS","rs","nama_rs","kode_rs","rsNama","rs_nama"])
-    );
-
-    // --- Sumber Informasi
-    vv.sumbers         = asArr(coalesce(
-      rec.sumbers, rec.sumberInformasi, rec.sumber_informasi, rec.sumberInfo, rec.sumber_info,
-      deepPick(rec, ["sumbers","sumberInformasi","sumber_informasi","sumberInfo","sumber_info"])
-    ));
-
-    // --- Tanggal-tanggal (longgar + alias) ---
-    vv.tglKecelakaan = toISOish(coalesce(
-      rec.tglKecelakaan, rec.tanggalKecelakaan, rec.tgl_kecelakaan, rec.tanggal_kecelakaan,
-      deepPick(rec, ["tglKecelakaan","tanggalKecelakaan","tgl_kecelakaan","tanggal_kecelakaan"])
-    ));
-    vv.hariTanggal = toISOish(coalesce(
-      rec.hariTanggal, rec.tanggalSurvei, rec.tanggal_survei, rec.tglSurvei, rec.tgl_survei,
-      rec.tanggalKecelakaan, vv.tglKecelakaan
-    ));
-    vv.tglMasukRS = toISOish(coalesce(
-      rec.tglMasukRS, rec.tanggalMasukRS, rec.tgl_masuk_rs, rec.tanggal_masuk_rs, rec.tglMasuk, rec.tanggal_masuk,
-      deepPick(rec, ["tglMasukRS","tanggalMasukRS","tgl_masuk_rs","tanggal_masuk_rs","tglMasuk","tanggal_masuk"])
-    ));
-    vv.tglJamNotifikasi = coalesce(
-      rec.tglJamNotifikasi, rec.tgl_jam_notifikasi, rec.jamNotifikasi, rec.waktuNotifikasi, rec.notifAt, rec.notifikasi_at,
-      deepPick(rec, ["tglJamNotifikasi","tgl_jam_notifikasi","jamNotifikasi","waktuNotifikasi","notifAt","notifikasi_at"])
-    );
-    vv.tglJamKunjungan = coalesce(
-      rec.tglJamKunjungan, rec.tgl_jam_kunjungan, rec.jamKunjungan, rec.waktuKunjungan, rec.visitAt, rec.kunjungan_at,
-      deepPick(rec, ["tglJamKunjungan","tgl_jam_kunjungan","jamKunjungan","waktuKunjungan","visitAt","kunjungan_at"])
-    );
-
-    // --- Narasi ---
-    vv.uraian       = coalesce(rec.uraianSurvei, rec.uraian);
-    vv.kesimpulan   = coalesce(rec.kesimpulanSurvei, rec.kesimpulan);
-    vv.uraianKunjungan = coalesce(rec.uraianKunjungan, deepPick(rec, ["uraianKunjungan","uraian_kunjungan"]));
-    vv.rekomendasi  = coalesce(rec.rekomendasi,     deepPick(rec, ["rekomendasi","kesimpulanRS","kesimpulan_rs"]));
-
-    // --- Hubungan AW ---
-    let hs = rec.hubunganSesuai ?? rec.hubungan_sesuai;
+    // --- Hubungan AW (normalisasi boolean/string) ---
+    let hs = rec.hubunganSesuai;
     if (typeof hs === "string") {
       const s = hs.trim().toLowerCase();
       if (["ya","y","true","1","sesuai"].includes(s)) hs = true;
@@ -649,101 +896,91 @@ import { supabase } from "../lib/supabaseClient";
     }
     vv.hubunganSesuai = hs;
 
-    // --- Pejabat/TTD (builder baca __showTtd & __ttdUrl) ---
-    vv.petugasJabatan = coalesce(rec.petugasJabatan, rec.petugas_jabatan);
-    vv.pejabatMengetahuiName    = coalesce(rec.pejabatMengetahuiName,    "Andi Raharja, S.A.B");
-    vv.pejabatMengetahuiJabatan = coalesce(rec.pejabatMengetahuiJabatan, "Kepala Bagian Operasional");
-
-    vv.__showTtd = rec.__showTtd ?? rec.showTtd ?? false;
-    vv.__ttdUrl  = coalesce(rec.__ttdUrl, rec.ttdUrl, rec.pejabatTtd, rec.ttd_mengetahui);
-
-    // Kalau kamu juga mau pakai TTD petugas di template RS:
-    vv.petugasTtd = coalesce(rec.petugasTtd, rec.petugas_ttd);
+    // --- TTD/pejabat (fallback aman) ---
+    vv.petugasJabatan = rec.petugasJabatan || "";
+    vv.pejabatMengetahuiName    = rec.pejabatMengetahuiName    || "Andi Raharja, S.A.B";
+    vv.pejabatMengetahuiJabatan = rec.pejabatMengetahuiJabatan || "Kepala Bagian Operasional";
 
     // --- Status & verifikasi ---
-    vv.status          = coalesce(rec.status, "terkirim");
-    vv.verified        = !!rec.verified;
-    vv.verifiedAt      = coalesce(rec.verifiedAt, rec.verified_at) || null;
-    vv.verifyNote      = coalesce(rec.verifyNote, rec.verify_note) || null;
-    vv.verifyChecklist = coalesce(rec.verifyChecklist, rec.verify_checklist) || null;
-    vv.unverifiedAt    = coalesce(rec.unverifiedAt, rec.unverified_at) || null;
-    vv.unverifyNote    = coalesce(rec.unverifyNote, rec.unverify_note) || null;
+    vv.status            = rec.status || "terkirim";
+    vv.verified          = !!rec.verified;
+    vv.verifiedAt        = rec.verifiedAt || rec.verified_at || null;
+    vv.verifyNote        = rec.verifyNote || rec.verify_note || null;
+    vv.verifyChecklist   = rec.verifyChecklist || rec.verify_checklist || null;
+    vv.unverifiedAt      = rec.unverifiedAt || rec.unverified_at || null;
+    vv.unverifyNote      = rec.unverifyNote || rec.unverify_note || null;
 
-    // --- Attachments (gabungkan beberapa kemungkinan container) ---
-    let att = (typeof rec.attachSurvey === "object" && rec.attachSurvey)
-           || (typeof rec.attach_survey === "object" && rec.attach_survey)
-           || (typeof rec.attachments  === "object" && rec.attachments)
-           || rec.attachSurvey || rec.attach_survey || rec.attachments || {};
-    // ✅ kalau string JSON, parse
-    if (typeof att === "string") {
-      try { att = JSON.parse(att); } catch {}
-    }
-    vv.attachSurvey = (att && typeof att === "object") ? att : {};
+    // --- Rating/feedback ---
+    vv.rating   = rec.rating ?? rec.rating_value ?? rec.star ?? null;
+    vv.feedback = rec.feedback ?? rec.feedback_text ?? rec.ulasan ?? null;
 
-    // --- Kumpulan file jadi format seragam ---
+    // --- Kumpulan lampiran: satukan jadi satu format seragam ---
+    vv.attachSurvey = rec.attachSurvey && typeof rec.attachSurvey === "object" ? rec.attachSurvey : {};
+
     const files = [];
+
     const pushFile = (f, label = "Lampiran") => {
       if (!f) return;
-      if (Array.isArray(f)) { f.forEach(x => pushFile(x, label)); return; }
+      if (Array.isArray(f)) { f.forEach((x) => pushFile(x, label)); return; }
+
       if (typeof f === "string") {
         files.push({ label, name: f.split("/").pop() || label, url: f });
         return;
       }
-      // object
-      const name = coalesce(f.name, f.fileName, f.filename, f.label, label);
-      const src  = coalesce(f.dataURL, f.url, f.path);
-      const fileObj = (typeof File !== "undefined" && f.file instanceof File) ? f.file : undefined;
-      files.push({
+
+      // Object
+      const name =
+        f.name || f.fileName || f.filename || f.label || label;
+      const dataURL =
+        f.dataURL || f.url || f.path ||
+        (f.file instanceof File ? f.file : null);
+
+      const entry = {
         type: f.type || undefined,
         label: f.label || label,
         name,
-        url: typeof src === "string" ? src : undefined,
-        dataURL: undefined, // biarin builder yang handle objURL untuk File
-        file: fileObj,
+        url: typeof dataURL === "string" ? dataURL : undefined,
+        dataURL: typeof dataURL !== "string" ? undefined : undefined,
+        file: dataURL instanceof File ? dataURL : undefined,
         size: f.size,
-      });
+      };
+      files.push(entry);
     };
 
-    // sumber umum form
+    // Sumber umum yang sering dipakai FormPage
     pushFile(rec.fotoSurveyList, "Foto Survey");
-    pushFile(rec.fotoSurvey,     "Foto Survey");
     pushFile(rec.fotoList,       "Foto Survey");
-    pushFile(rec.fotoKejadianList, "Foto Kejadian");
     pushFile(rec.laporanRSList,  "Laporan RS");
     pushFile(rec.rsList,         "Berkas RS");
 
-    // root-level kemungkinan lampiran
+    // Root-level potensi lampiran per jenis
     ["ktp","kk","bukuTabungan","formPengajuan","formKeteranganAW","skKematian","aktaKelahiran"]
       .forEach((k) => pushFile(rec[k], k));
 
-    // dari attachSurvey object
+    // Object attachSurvey { ktp: ..., kk: ..., ... }
     if (vv.attachSurvey && !Array.isArray(vv.attachSurvey)) {
       Object.entries(vv.attachSurvey).forEach(([k, v]) => pushFile(v, k));
     }
 
     vv.files = files;
 
-    // --- Turunan: kumpulan foto untuk preview RS/LL ---
-    const isImage = (s="") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(s);
-    vv.allPhotos = files.filter(f =>
-      isImage(String(f.name || "").toLowerCase()) ||
-      isImage(String(f.url  || "").toLowerCase()) ||
-      f.type === "foto"
+    // Derivasi: kumpulan foto (untuk preview RS/LL)
+    const isImage = (nOrUrl = "") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(nOrUrl);
+    vv.allPhotos = files.filter((f) =>
+      isImage((f.name || "").toLowerCase()) || isImage((f.url || "").toLowerCase()) || f.type === "foto"
     );
 
-    // Agar builder LL dapat sumber foto langsung juga:
-    vv.fotoSurveyList = asArr(coalesce(rec.fotoSurveyList, rec.fotoSurvey, att.fotoSurvey))
-      .filter(Boolean);
-
-    // --- Hitungan ringkas ---
+    // Hitungan ringkas
     vv.counts = {
-      singles: asArr(rec.rsList).length,
-      fotoSurvey: asArr(rec.fotoList).length || asArr(rec.fotoSurveyList).length,
-      fotoKejadian: asArr(rec.fotoKejadianList).length,
+      singles: rec.rsList?.length || 0,
+      fotoSurvey: (rec.fotoList?.length || rec.fotoSurveyList?.length || 0),
+      fotoKejadian: rec.fotoKejadianList?.length || 0,
     };
 
-    // --- updatedAt untuk sorting ---
-    vv._updatedAt = coalesce(rec.updated_at, rec.verified_at, rec.unverified_at, rec.waktu, rec.createdAt, rec.created_at) || null;
+    // “_updatedAt” untuk sorting di DataForm
+    vv._updatedAt =
+      rec.updated_at || rec.verified_at || rec.unverified_at ||
+      rec.waktu || rec.createdAt || rec.created_at || null;
 
     return vv;
   }
@@ -802,59 +1039,34 @@ export default function VerifikatorDashboard() {
     if (!queueItem) return;
     setDetailLoading(true);
     setDetailHTML("");
-    // bersihkan blob lama
     try { blobUrls.forEach((u) => URL.revokeObjectURL(u)); } catch {}
     setBlobUrls([]);
 
     try {
-      // Ambil row asli dari Supabase berdasar local_id
-      let { data, error } = await supabase
-        .from(queueItem.__table || "DataForm")
+      // 1) Ambil row "dataform" dasar (punyamu sudah benar)
+      let { data: base, error } = await supabase
+        .from(queueItem.__table || "dataform")
         .select("*")
         .eq("local_id", queueItem.id)
-        .limit(1)
         .maybeSingle();
 
-      if (error) {
-        // fallback kalau nama tabel lowercase
-        let alt = await supabase
-          .from("dataform")
-          .select("*")
-          .eq("local_id", queueItem.id)
-          .limit(1)
-          .maybeSingle();
-        data = alt.data;
-        error = alt.error;
-      }
       if (error) throw error;
-      if (!data) {
+      if (!base) {
         setDetailHTML(`<div style="padding:16px;font-family:sans-serif">Data detail tidak ditemukan.</div>`);
         return;
       }
 
-      const vv = await prepareForOutput(data);
-      console.log("RS DEBUG", { // ✅ debug cek isi sebelum render
-        wilayah: vv.wilayah,
-        lokasi: vv.tempatKecelakaan || vv.lokasiKecelakaan,
-        rs: vv.rumahSakit,
-        tglMasukRS: vv.tglMasukRS,
-        notif: vv.tglJamNotifikasi,
-        kunjungan: vv.tglJamKunjungan,
-      });
-      const ver = (data.counts && data.counts.verifikator) || {};
-      vv.__showTtd =
-        ver.status === "disetujui" ||
-        data.status === "selesai"  ||
-        queueItem?.status === "disetujui";
-      vv.__ttdUrl = ttdUrl || new URL("andi-ttd.jpeg", window.location.origin).href;
-      console.log("TTD URL:", vv.__ttdUrl, "show?", vv.__showTtd, {
-        template: data.template,
-        sifat: data?.sifatCidera,
-        status: data.status,
-        verStatus: ver.status,
-      });
+      // 2) Enrich dari tabel varian (RS / MD / LL) pakai helper yang sudah kamu buat
+      const { variant, row } = await fetchDetailFromSupabase(base);
+      const merged = row ? { ...base, ...normalizeDetailRow(variant, row) } : base;
 
-      // utility untuk buat blob URL jika ada File
+      // 3) Bentuk output final untuk preview
+      const vv = await prepareForOutput(merged);
+
+      // 4) Render sesuai varian
+      const template = (vv.template || "").toLowerCase();
+      const sifat = (vv.sifatCidera || vv.jenisSurvei || "").toLowerCase();
+
       const createdBlobUrls = [];
       const objURL = (maybeFile) => {
         if (maybeFile instanceof File) {
@@ -865,84 +1077,72 @@ export default function VerifikatorDashboard() {
         return null;
       };
 
-      // pilih template
-      const template = (data.template || "").toLowerCase();
-      const sifat = (data?.sifatCidera || "").toLowerCase();
-
-      if (sifat.includes("meninggal") || template.includes("survei_md")) {
-        const html = await buildPreviewHTML_MD(vv, objURL);
-        setDetailHTML(html);
-        setBlobUrls(createdBlobUrls);
-        return;
-      }
-      if (sifat.includes("luka") || template.includes("survei_ll")) {
-        const html = buildPreviewHTML_LL(vv, objURL);
-        setDetailHTML(html);
-        setBlobUrls(createdBlobUrls);
-        return;
-      }
+      let html;
       if (template.includes("kunjungan")) {
-        const html = buildPreviewHTML_RS(vv, objURL);
-        setDetailHTML(html);
-        setBlobUrls(createdBlobUrls);
-        return;
+        html = buildPreviewHTML_RS(vv, objURL);
+      } else if (sifat.includes("meninggal") || template.includes("survei_md")) {
+        html = await buildPreviewHTML_MD(vv, objURL);
+      } else {
+        html = buildPreviewHTML_LL(vv, objURL);
       }
 
-      setDetailHTML(`<div style="padding:16px;font-family:sans-serif">Template tidak dikenali untuk preview.</div>`);
+      setDetailHTML(html);
+      setBlobUrls(createdBlobUrls);
     } catch (e) {
       console.error(e);
       setDetailHTML(`<div style="padding:16px;font-family:sans-serif;color:#a00">Gagal memuat detail.</div>`);
     } finally {
       setDetailLoading(false);
     }
-  }, [blobUrls, ttdUrl]);
+  }, [blobUrls]);
 
   const openPreview = useCallback(async (rec) => {
-    if (!rec) return;
-    const vv = await prepareForOutput(rec);
-    console.log("RS DEBUG (openPreview)", {
-      wilayah: vv.wilayah,
-      lokasi: vv.tempatKecelakaan || vv.lokasiKecelakaan,
-      rs: vv.rumahSakit,
-      tglMasukRS: vv.tglMasukRS,
-      notif: vv.tglJamNotifikasi,
-      kunjungan: vv.tglJamKunjungan,
-    });
-    console.log("🧩 Preview data vv:", vv);
-    const template = (rec.template || "").toLowerCase();
-    const sifat = (rec?.sifatCidera || "").toLowerCase();
-    const createdBlobUrls = [];
-
-    const objURL = (maybeFile) => {
-      if (maybeFile instanceof File) {
-        const u = URL.createObjectURL(maybeFile);
-        createdBlobUrls.push(u);
-        return u;
+      try {
+        // 1) ambil row detail dari tabel varian
+        const { variant, row } = await fetchDetailFromSupabase(rec);
+  
+        // 2) normalisasi & gabung ke record awal (biar field-nya lengkap)
+        const merged = row
+          ? { ...rec, ...normalizeDetailRow(variant, row) }
+          : rec;
+  
+        // 3) bentuk payload final untuk modal/preview
+        const vv = await prepareForOutput(merged);
+  
+        // 4) pilih builder preview sesuai varian (punyamu sudah ada)
+        const template = (vv.template || "").toLowerCase();
+        const sifat = (vv.sifatCidera || vv.jenisSurvei || "").toLowerCase();
+        const createdBlobUrls = [];
+        const objURL = (maybeFile) => {
+          if (maybeFile instanceof File) {
+            const u = URL.createObjectURL(maybeFile);
+            createdBlobUrls.push(u);
+            return u;
+          }
+          return null;
+        };
+  
+        if (sifat.includes("meninggal") || template.includes("survei_md")) {
+          const html = await buildPreviewHTML_MD(vv, objURL);
+          setDetailData({ ...vv, __variant: "md", previewHTML: html });
+        } else if (sifat.includes("luka") || template.includes("survei_ll")) {
+          const html = buildPreviewHTML_LL(vv, objURL);
+          setDetailData({ ...vv, __variant: "ll", previewHTML: html });
+        } else if (template.includes("kunjungan")) {
+          const html = buildPreviewHTML_RS(vv, objURL);
+          setDetailData({ ...vv, __variant: "rs", previewHTML: html });
+        } else {
+          // fallback: tetap tampilkan tanpa HTML khusus
+          setDetailData({ ...vv, __variant: "ll", previewHTML: null });
+        }
+  
+        setBlobUrls(createdBlobUrls);
+        setDetailOpen(true);
+      } catch (e) {
+        console.error("openPreview error:", e);
+        alert("Gagal membuka detail. Cek console untuk detail error.");
       }
-      return null;
-    };
-
-    // 🔁 1) SURVEI MENINGGAL DUNIA (MD) — cek duluan
-    if (sifat.includes("meninggal") || template.includes("survei_md")) {
-      const html = await buildPreviewHTML_MD(vv, objURL); // ⬅️ ini isinya
-      // NOTE: fungsi ini tidak dipakai di tombol “Lihat Berkas”, biar dibiarkan
-      return;
-    }
-
-    // 🔁 2) SURVEI LUKA-LUKA (LL)
-    if (sifat.includes("luka") || template.includes("survei_ll")) {
-      const html = buildPreviewHTML_LL(vv, objURL); // ⬅️ ini isinya
-      return;
-    }
-
-    // 🔁 3) KUNJUNGAN RS (RS) — terakhir
-    if (template.includes("kunjungan")) {
-      const reportHTML = buildPreviewHTML_RS(vv, objURL); // ⬅️ isi preview-nya
-      return;
-    }
-
-    alert("Template tidak dikenali atau belum disiapkan preview-nya.");
-  }, []);
+    }, []);
 
   function mapRowToQueueItem(row) {
     // ambil status verifikator sub-flow dari JSONB counts.verifikator (kalau ada)
@@ -976,7 +1176,7 @@ export default function VerifikatorDashboard() {
       stampPage: ver.stampPage || "",    // opsional
       stampedPdfUrl: ver.stampedPdfUrl,  // kalau pernah distempel & disimpan
       __rawCounts: row.counts || {},
-      __table: "DataForm",
+      __table: "dataform",
     };
   }
 
@@ -986,7 +1186,7 @@ export default function VerifikatorDashboard() {
        // Ambil pengajuan yang sudah diverifikasi petugas & masuk antrean admin:
        // status "diproses" (menunggu putusan admin) dan "selesai" (sudah disetujui admin)
        let resp = await supabase
-         .from("DataForm")
+         .from("dataform")
          .select("id, local_id, korban, status, verified, verified_at, verify_note, verify_checklist, waktu, updated_at, files, counts")
          .in("status", ["diproses", "selesai"])
          .order("updated_at", { ascending: false });
@@ -1089,7 +1289,7 @@ export default function VerifikatorDashboard() {
 
     // update by local_id (bukan id UUID table)
     const { error } = await supabase
-      .from(item.__table || "DataForm")
+      .from(item.__table || "dataform")
       .update({
         status: nextMainStatus,
         counts: nextCounts,

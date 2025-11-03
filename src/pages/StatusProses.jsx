@@ -234,7 +234,7 @@ export default function StatusProses() {
         setLoading(true);
 
         let q = supabase
-          .from("DataForm")
+          .from("dataform")
           .select(
             "id, local_id, korban, template, jenisSurvei, jenisSurveyLabel, status, verified_at, unverified_at, waktu, updated_at, files, counts, verify_note, unverify_note, finish_note, reject_note"
           )
@@ -320,7 +320,7 @@ export default function StatusProses() {
         .channel("status_proses_user")
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "DataForm" },
+          { event: "*", schema: "public", table: "dataform" },
           () => { pullFromSupabase(); }
         )
         .subscribe();

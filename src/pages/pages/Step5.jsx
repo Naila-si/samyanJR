@@ -80,7 +80,7 @@ async function kirimKeSupabase(formData) {
   console.log("📤 Payload ke Supabase:", record);
 
   // ===== INSERT =====
-  const { error } = await supabase.from("DataForm").insert([record]);
+  const { error } = await supabase.from("dataform").insert([record]);
 
   if (error) {
     console.error("❌ Supabase insert error:", {

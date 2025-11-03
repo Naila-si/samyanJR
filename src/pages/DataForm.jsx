@@ -1,8 +1,153 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient";
 
+const detectVariant = (d) => {
+  const t = (d.template || "").toLowerCase();
+  const s = (d.jenisSurvei || d.jenisSurveyLabel || d.sifatCidera || "").toLowerCase();
+  if (t.includes("kunjungan")) return "rs";
+  if (t.includes("survei_md") || s.includes("meninggal")) return "md";
+  if (t.includes("survei_ll") || s.includes("luka")) return "ll";
+  return "ll";
+};
+
+const TABLE_BY_VARIANT = {
+  rs: "form_kunjungan_rs",
+  md: "form_survei_aw", // MD & LL sama-sama di tabel ini
+  ll: "form_survei_aw",
+};
+
+async function fetchDetailFromSupabase(rec) {
+  const variant = detectVariant(rec);
+  const table = TABLE_BY_VARIANT[variant];
+
+  // Bangun OR filter dari key yang bener-bener ADA di tabel varian
+  const ors = [];
+  // umum
+  if (rec.id)         ors.push(`id.eq.${rec.id}`);
+  if (rec.noPL)       ors.push(`no_pl.eq.${rec.noPL}`);
+
+  // khusus RS (berdasarkan hasil query & screenshot-mu)
+  if (variant === "rs") {
+    if (rec.local_id) ors.push(`local_id.eq.${rec.local_id}`);
+    if (rec.korban)   ors.push(`korban.eq.${rec.korban}`);
+    // no_pl biasanya tidak ada di RS, tapi ga masalah jika ikut (akan diabaikan jika null)
+  } else {
+    // survei_aw (MD/LL) pakai nama_korban
+    if (rec.korban)   ors.push(`nama_korban.eq.${rec.korban}`);
+  }
+
+  if (ors.length === 0) {
+    return { variant, table, row: null };
+  }
+
+  const { data, error } = await supabase
+    .from(table)
+    .select("*")
+    .or(ors.join(","))
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) {
+    console.warn(`[detail] fetch ${table} gagal:`, error.message || error);
+    return { variant, table, row: null };
+  }
+  return { variant, table, row: (data && data[0]) || null };
+}
+
+function normalizeDetailRow(variant, row) {
+  if (!row) return {};
+
+  const parseMaybe = (v) => {
+    if (!v) return null;
+    if (typeof v === "object") return v;
+    try { return JSON.parse(v); } catch { return null; }
+  };
+
+  const base = {
+    id: row.local_id ?? row.id ?? row.uuid ?? null,
+    createdAt: row.created_at ?? row.waktu ?? null,
+    waktu: row.waktu ?? row.created_at ?? null,
+
+    template:
+      row.template ??
+      (variant === "rs"
+        ? "kunjungan_rs"
+        : (row.jenis_survei
+            ? `survei_${String(row.jenis_survei).toLowerCase().includes("meninggal") ? "md" : "ll"}`
+            : "")),
+
+    // umum
+    korban: row.korban ?? row.nama_korban ?? null,
+    petugas: row.petugas ?? row.petugas_survei ?? null,
+    jenisSurvei: row.jenis_survei ?? row.jenisSurvei ?? null,
+    jenisSurveyLabel: row.jenis_survei_label ?? row.jenisSurveyLabel ?? row.jenis_survei ?? null,
+    noPL: row.no_pl ?? row.noPL ?? null,
+    hubunganSesuai: row.hubungan_sesuai ?? null,
+    sumbers: parseMaybe(row.sumbers) ?? row.sumbers ?? [],
+    uraian: row.uraian ?? null,
+
+    tanggalKecelakaan: row.tanggal_kecelakaan ?? row.tanggalkecelakaan ?? row.tgl_kecelakaan ?? null,
+    tglKecelakaan: row.tgl_kecelakaan ?? row.tanggal_kecelakaan ?? null,
+    hariTanggal: row.hari_tanggal ?? row.hariTanggal ?? null,
+
+    noBerkas: row.no_berkas ?? null,
+    alamatKorban: row.alamat_korban ?? null,
+    tempatKecelakaan: row.tempat_kecelakaan ?? row.lokasi_kecelakaan ?? null,
+
+    status: row.status ?? "terkirim",
+    verified: !!row.verified,
+    verifiedAt: row.verified_at ?? null,
+    verifyNote: row.verify_note ?? null,
+    verifyChecklist: parseMaybe(row.verify_checklist) ?? row.verify_checklist ?? null,
+    unverifiedAt: row.unverified_at ?? null,
+    unverifyNote: row.unverify_note ?? null,
+    rejectedAt: row.rejected_at ?? null,
+    rejectNote: row.reject_note ?? null,
+    finishedAt: row.finished_at ?? null,
+    finishNote: row.finish_note ?? null,
+
+    rating: row.rating ?? row.rating_value ?? null,
+    feedback: row.feedback ?? row.feedback_text ?? null,
+  };
+
+  if (variant === "rs") {
+    Object.assign(base, {
+      // sesuai kolom yang kamu tunjukkan di screenshot RS:
+      wilayah: row.wilayah ?? null,
+      lokasiKecelakaan: row.lokasi_kecelakaan ?? row.tempat_kecelakaan ?? null,
+      rumahSakit: row.rumah_sakit ?? row.nama_rs ?? null,
+      tglMasukRS: row.tgl_masuk_rs ?? row.tanggal_masuk_rs ?? null,
+      tglJamNotifikasi: row.tgl_jam_notifikasi ?? null,
+      tglJamKunjungan: row.tgl_jam_kunjungan ?? null,
+      uraianKunjungan: row.uraian_kunjungan ?? row.uraian ?? null,
+      rekomendasi: row.rekomendasi ?? null,
+
+      // tambahan yang kelihatan ada di tabel RS-mu:
+      petugasJabatan: row.petugas_jabatan ?? null,
+      petugasTtd: row.petugas_ttd ?? null,
+    });
+
+    // foto survey di RS: kolomnya `foto_survey` (array/json)
+    base.fotoSurveyList = parseMaybe(row.foto_survey) ?? row.foto_survey ?? [];
+  }
+
+  // lampiran umum/fallback lain
+  base.attachSurvey =
+    parseMaybe(row.attach_survey) ??
+    parseMaybe(row.attachSurvey) ??
+    parseMaybe(row.att) ??
+    parseMaybe(row.attachments) ??
+    row.attachSurvey ?? row.attach_survey ?? row.att ?? row.attachments ?? {};
+
+  // list foto lain (kalau ada di kolom berbeda)
+  base.rsList   = parseMaybe(row.rs_list)   ?? row.rs_list   ?? [];
+  base.fotoList = parseMaybe(row.foto_list) ?? row.foto_list ?? [];
+
+  return base;
+}
+
 async function syncVerificationToSupabase(rec, payload) {
-  const TABLES = ["DataForm", "dataform"];
+  const TABLES = ["dataform"];
   const nowIso = new Date().toISOString();
 
   const toTs = (v) => (v ? new Date(v).toISOString() : null);          
@@ -142,31 +287,6 @@ async function syncVerificationToSupabase(rec, payload) {
 
   console.error("❌ Gagal simpan verifikasi (update & upsert gagal).");
   return null;
-}
-
-const LS_KEY = "formDataList";
-const LS_VERIF = "spa_verifikator_queue";
-
-function getListSafe(key) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) return parsed;
-    if (parsed && typeof parsed === "object") return [parsed]; // self-heal
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-function tryWriteWhole(key, arr) {
-  try {
-    localStorage.setItem(key, JSON.stringify(arr));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 const fmtDT = (d) => {
@@ -1350,86 +1470,29 @@ export default function DataForm() {
 
   const syncFromSupabase = useCallback(async () => {
     try {
-      // 1) coba akses tabel dengan nama sekarang
-      let resp = await supabase
-        .from("DataForm")
+      const { data, error, status } = await supabase
+        .from("dataform")
         .select("*")
         .order("waktu", { ascending: false });
 
-      // 2) kalau 500 / error, log semua detail yang ada
-      if (resp.error) {
-        const e = resp.error;
+      if (error) {
         console.error("❌ Supabase fetch error:", {
-          message: e.message, details: e.details, hint: e.hint, code: e.code, status: e.status,
+          message: error.message, details: error.details, hint: error.hint, code: error.code, status,
         });
-        // 3) fallback: coba tabel lowercase (sering terjadi beda casing)
-        if (e.code === "PGRST116" || e.status === 500 || e.status === 404) {
-          console.warn("↪️ Mencoba fallback ke tabel 'dataform'…");
-          resp = await supabase
-            .from("dataform")
-            .select("*")
-            .order("waktu", { ascending: false });
-        }
-      }
-
-      if (resp.error) {
-        // 4) kalau masih error, jangan clear UI; pakai data lokal saja
-        console.error("❌ Gagal fetch Supabase (final):", {
-          message: resp.error.message,
-          details: resp.error.details,
-          hint: resp.error.hint,
-          code: resp.error.code,
-          status: resp.error.status,
-        });
-        const localOnly = getListSafe(LS_KEY);
-        setRows(localOnly);
+        setRows([]); // server-only: kosongkan UI kalau fetch gagal
         return;
       }
 
-      const data = resp.data || [];
-      console.log("🟢 Supabase OK | rows:", data.length);
-
-      // 5) normalisasi + log contoh kolom penting
-      const remote = data.map(normalizeRemoteRow);
-      console.table(
-        remote.slice(0, 10).map(r => ({
-          id: r.id, waktu: r.waktu, template: r.template, status: r.status,
-          attKeys: r.attachSurvey && typeof r.attachSurvey === "object"
-            ? Object.keys(r.attachSurvey).join(",")
-            : "(none)",
-        }))
-      );
-
-      // 6) merge dengan local (safe)
-      const localList = getListSafe(LS_KEY);
-      const byIdLocal = new Map(localList.map((x) => [String(x.id), x]));
-
-      const merged = remote.map((r) => {
-        const l = byIdLocal.get(String(r.id));
-        return l ? mergeRecords(l, r) : r;
-      });
-
-      const remoteIds = new Set(remote.map((x) => String(x.id)));
-      localList.forEach((l) => {
-        if (!remoteIds.has(String(l.id))) merged.push(l);
-      });
-
-      if (!tryWriteWhole(LS_KEY, merged)) {
-        console.warn("⚠️ Gagal menulis hasil merged ke localStorage.");
-      }
-
-      setRows(merged);
-      console.log("🔎 Supabase count:", data.length, "| merged rows:", merged.length);
+      const remote = (data || []).map(normalizeRemoteRow);
+      setRows(remote); // ✅ langsung pakai data server
+      console.log("🟢 Supabase OK | rows:", remote.length);
     } catch (e) {
-      // 7) runtime error (mis. network) → pakai local agar UI gak blank
       console.error("❌ syncFromSupabase runtime error:", e);
-      setRows(getListSafe(LS_KEY));
+      setRows([]); // server-only: jangan fallback ke local
     }
   }, []);
 
-
   useEffect(() => {
-    setRows(getListSafe(LS_KEY));
     syncFromSupabase();
   }, [syncFromSupabase]);
 
@@ -2177,52 +2240,51 @@ export default function DataForm() {
   }
 
   const openPreview = useCallback(async (rec) => {
-    console.log("%c🔄 MOUNT DataForm", "color:#b23b76;font-weight:bold");
-    if (!rec) return;
-    console.log("🚀 openPreview dipanggil dengan:", rec?.template, rec?.petugasTtd);
-    const vv = await prepareForOutput(rec);
-    console.log("🧩 Preview data vv:", vv);
-    const template = (rec.template || "").toLowerCase();
-    const sifat = (rec?.sifatCidera || "").toLowerCase();
-    const createdBlobUrls = [];
+    try {
+      // 1) ambil row detail dari tabel varian
+      const { variant, row } = await fetchDetailFromSupabase(rec);
 
-    const objURL = (maybeFile) => {
-      if (maybeFile instanceof File) {
-        const u = URL.createObjectURL(maybeFile);
-        createdBlobUrls.push(u);
-        return u;
+      // 2) normalisasi & gabung ke record awal (biar field-nya lengkap)
+      const merged = row
+        ? { ...rec, ...normalizeDetailRow(variant, row) }
+        : rec;
+
+      // 3) bentuk payload final untuk modal/preview
+      const vv = await prepareForOutput(merged);
+
+      // 4) pilih builder preview sesuai varian (punyamu sudah ada)
+      const template = (vv.template || "").toLowerCase();
+      const sifat = (vv.sifatCidera || vv.jenisSurvei || "").toLowerCase();
+      const createdBlobUrls = [];
+      const objURL = (maybeFile) => {
+        if (maybeFile instanceof File) {
+          const u = URL.createObjectURL(maybeFile);
+          createdBlobUrls.push(u);
+          return u;
+        }
+        return null;
+      };
+
+      if (sifat.includes("meninggal") || template.includes("survei_md")) {
+        const html = await buildPreviewHTML_MD(vv, objURL);
+        setDetailData({ ...vv, __variant: "md", previewHTML: html });
+      } else if (sifat.includes("luka") || template.includes("survei_ll")) {
+        const html = buildPreviewHTML_LL(vv, objURL);
+        setDetailData({ ...vv, __variant: "ll", previewHTML: html });
+      } else if (template.includes("kunjungan")) {
+        const html = buildPreviewHTML_RS(vv, objURL);
+        setDetailData({ ...vv, __variant: "rs", previewHTML: html });
+      } else {
+        // fallback: tetap tampilkan tanpa HTML khusus
+        setDetailData({ ...vv, __variant: "ll", previewHTML: null });
       }
-      return null;
-    };
 
-    // 🔁 1) SURVEI MENINGGAL DUNIA (MD) — cek duluan
-    if (sifat.includes("meninggal") || template.includes("survei_md")) {
-      const html = await buildPreviewHTML_MD(vv, objURL); // ⬅️ ini isinya
-      setDetailData({ ...vv, __variant: "md", previewHTML: html });
       setBlobUrls(createdBlobUrls);
       setDetailOpen(true);
-      return;
+    } catch (e) {
+      console.error("openPreview error:", e);
+      alert("Gagal membuka detail. Cek console untuk detail error.");
     }
-
-    // 🔁 2) SURVEI LUKA-LUKA (LL)
-    if (sifat.includes("luka") || template.includes("survei_ll")) {
-      const html = buildPreviewHTML_LL(vv, objURL); // ⬅️ ini isinya
-      setDetailData({ ...vv, __variant: "ll", previewHTML: html });
-      setBlobUrls(createdBlobUrls);
-      setDetailOpen(true);
-      return;
-    }
-
-    // 🔁 3) KUNJUNGAN RS (RS) — terakhir
-    if (template.includes("kunjungan")) {
-      const reportHTML = buildPreviewHTML_RS(vv, objURL); // ⬅️ isi preview-nya
-      setDetailData({ ...vv, __variant: "rs", previewHTML: reportHTML });
-      setBlobUrls(createdBlobUrls);
-      setDetailOpen(true);
-      return;
-    }
-
-    alert("Template tidak dikenali atau belum disiapkan preview-nya.");
   }, []);
 
   const closeDetail = useCallback(() => {
@@ -2242,99 +2304,39 @@ export default function DataForm() {
   }, []);
 
   const applyVerification = useCallback(async (payload) => {
-    const BK_RAW = localStorage.getItem(LS_KEY); 
-    let updatedRecForSync = null;                
-
-    setRows((prev) => {
-      const next = prev.map((r) => {
-        if (r.id !== payload.id) return r;
-        const now = payload.timestamp;
-
-        if (payload.action === "verify") {
-          try {
-            const q = getListSafe(LS_VERIF);
-            if (!q.some((it) => it.id === r.id)) {
-              q.unshift({
-                id: r.id,
-                pemohon: r.korban,
-                status: "menunggu",
-                tanggal: now.slice(0, 10),
-                pdfUrl: r.pdfBlobUrl || "/Lembar_Kunjungan_RS_NAI.pdf",
-              });
-              localStorage.setItem(LS_VERIF, JSON.stringify(q));
-            }
-          } catch {}
-
-          const rec = {
-            ...r,
-            verified: true,
-            verifiedAt: now,
-            verifyNote: payload.note || undefined,
-            verifyChecklist: payload.checks,
-            status: "diproses", // (opsional) supaya UI juga ikut ganti
-          };
-          updatedRecForSync = rec; // ← simpan buat sync ke Supabase
-          return rec;
-        }
-
-        if (payload.action === "unverify") {
-          const rec = {
-            ...r,
-            verified: false,
-            unverifiedAt: now,
-            unverifyNote: payload.note || undefined,
-            status: "terkirim", // (opsional)
-          };
-          updatedRecForSync = rec; // ← simpan buat sync ke Supabase
-          return rec;
-        }
-
-         if (payload.action === "finish") {
-          const rec = {
-            ...r,
-            // boleh tetap verified sesuai kondisi sebelumnya
-            finishedAt: now,
-            finishNote: payload.note || undefined,
-            status: "selesai",
-          };
-          updatedRecForSync = rec;
-          return rec;
-        }
-
-        if (payload.action === "reject") {
-          const rec = {
-            ...r,
-            verified: false,
-            rejectedAt: now,
-            rejectNote: payload.note || undefined,
-            status: "ditolak",
-          };
-          updatedRecForSync = rec;
-          return rec;
-        }
-
-        return r;
-      });
-
-      // tulis aman + rollback
-      if (!tryWriteWhole(LS_KEY, next)) {
-        if (BK_RAW != null) localStorage.setItem(LS_KEY, BK_RAW);
-        alert("Gagal menyimpan status verifikasi (kemungkinan quota). Perubahan dibatalkan.");
-        updatedRecForSync = null; // batalkan sync
-        return prev;
+    // (opsional) optimistic update di UI
+    setRows((prev) => prev.map((r) => {
+      if (r.id !== payload.id) return r;
+      const now = payload.timestamp;
+      if (payload.action === "verify") {
+        return { ...r, verified: true, verifiedAt: now, verifyNote: payload.note || undefined, verifyChecklist: payload.checks, status: "diproses" };
       }
+      if (payload.action === "unverify") {
+        return { ...r, verified: false, unverifiedAt: now, unverifyNote: payload.note || undefined, status: "terkirim" };
+      }
+      if (payload.action === "finish") {
+        return { ...r, finishedAt: now, finishNote: payload.note || undefined, status: "selesai" };
+      }
+      if (payload.action === "reject") {
+        return { ...r, verified: false, rejectedAt: now, rejectNote: payload.note || undefined, status: "ditolak" };
+      }
+      return r;
+    }));
 
-      return next;
-    });
-
-    if (updatedRecForSync) {
-    console.log("🔄 Will sync:", { local_id: updatedRecForSync.id, action: payload.action });
-    await syncVerificationToSupabase(updatedRecForSync, payload);
-    await syncFromSupabase();
-  }
-
-    closeVerify();
-  }, [closeVerify]);
+    try {
+      await syncVerificationToSupabase(
+        // kirim record minimal (cari di state sekarang)
+        rows.find((x) => x.id === payload.id) || { id: payload.id },
+        payload
+      );
+    } catch (e) {
+      console.error("❌ Sync verifikasi gagal:", e);
+    } finally {
+      // refresh dari server agar pasti konsisten
+      await syncFromSupabase();
+      closeVerify();
+    }
+  }, [rows, syncFromSupabase, closeVerify]);
 
   return (
     <div className="df-wrap" style={{ maxWidth: "100%", margin: "0 auto" }}>
