@@ -14,6 +14,7 @@ import SidebarLayout from "./layouts/SidebarLayout.jsx";
 import DataPks from "./pages/DataPks.jsx";
 import DataAhliWaris from "./pages/DataAhliWaris.jsx";
 import DataWaris from "./pages/DataWaris.jsx";
+import DataSW from "./pages/DataSW.jsx";
 
 // role-spesifik
 import VerifikatorDashboard from "./pages/VerifikatorDashboard.jsx";
@@ -23,7 +24,7 @@ export default function App() {
   const loc = useLocation();
 
   // Halaman internal (pakai SidebarLayout) -> sembunyikan navbar atas
-  const HIDE_ON = ["/home", "/dataform", "/datapks", "/data-ahli-waris", "/data-waris", "/verifikator"];
+  const HIDE_ON = ["/home", "/dataform", "/datapks", "/data-ahli-waris", "/data-waris", "/verifikator", "/datasw"];
   const showNavbar = !HIDE_ON.some((p) => loc.pathname.startsWith(p));
 
   return (
@@ -72,6 +73,7 @@ export default function App() {
               <Route path="/datapks" element={<DataPks />} />
               <Route path="/data-ahli-waris" element={<DataAhliWaris />} />
               <Route path="/data-waris" element={<DataWaris />} />
+              <Route path="/datasw" element={<DataSW />} />
             </Route>
           </Route>
 

@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
+import { supabase } from "../../lib/supabaseClient";
 
 /* =========================================================
   THEME & UTIL
@@ -326,9 +327,79 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     pejabatMengetahuiTtd: data.pejabatMengetahuiTtd || "",
   };
 
-  // derive plat
+  const [platRows, setPlatRows] = useState({});
+  const [loadingPlat, setLoadingPlat] = useState(false);
+
   const detectedPlates = useMemo(() => extractPlates(v.uraian || ""), [v.uraian]);
-  const platSummary = useMemo(() => buildPlatSummary(detectedPlates), [detectedPlates]);
+
+  useEffect(() => {
+    const fetchPlat = async () => {
+      const plates = (detectedPlates || []).map(normalizePlate).filter(Boolean);
+      if (!plates.length) {
+        setPlatRows({});
+        return;
+      }
+      setLoadingPlat(true);
+      const { data: rows, error } = await supabase
+        .from("data_sw")
+        .select("no_polisi,nama_pemilik_terakhir,tgl_mati_yad,kode_golongan,alamat_pemilik_terakhir,nomor_hp,nik,prov_nama,deskripsi_plat")
+        .in("no_polisi", plates);
+
+      if (error) {
+        console.error("❌ Gagal fetch data plat:", error.message);
+        setPlatRows({});
+      } else {
+        const map = {};
+        (rows || []).forEach(r => { map[(r.no_polisi || "").toUpperCase()] = r; });
+        setPlatRows(map);
+      }
+      setLoadingPlat(false);
+    };
+    fetchPlat();
+  }, [detectedPlates]);
+
+  const platSummary = useMemo(() => {
+    const plates = (detectedPlates || []).map(normalizePlate).filter(Boolean);
+    if (!plates.length) return "—";
+
+    const lines = plates.map(p => {
+      const rec = platRows[p]; // hasil dari Supabase .in('no_polisi', ...)
+      if (!rec) {
+        // OPTIONAL fallback ke VEHICLE_DB kalau masih mau dipakai:
+        const off = VEHICLE_DB?.[p];
+        if (off) {
+          return [
+            `${p}`,
+            `Nama Pemilik Terakhir : ${off.pemilik || "-"}`,
+            `Tanggal Mati          : ${off.tglMati || "-"}`,
+            `Kode Golongan         : ${off.gol || "-"}`,
+            `Alamat Pemilik        : ${off.alamat || "-"}`,
+            `Nomor HP              : ${off.hp || "-"}`,
+            `NIK                   : ${off.nik || "-"}`,
+            `Provinsi              : ${off.prov || "-"}`,
+            `Deskripsi Plat        : ${off.deskripsi || "-"}`,
+          ].join("\n");
+        }
+        // kalau tidak ada di DB & tidak ada fallback
+        return `${p}\nData plat tidak ada di database.`;
+      }
+      // Format dari row Supabase
+      return [
+        `${p}`,
+        `Nama Pemilik Terakhir : ${rec.nama_pemilik_terakhir || "-"}`,
+        `Tanggal Mati          : ${fmtDate(rec.tgl_mati_yad)}`,
+        `Kode Golongan         : ${rec.kode_golongan || "-"}`,
+        `Alamat Pemilik        : ${rec.alamat_pemilik_terakhir || "-"}`,
+        `Nomor HP              : ${rec.nomor_hp || "-"}`,
+        `NIK                   : ${rec.nik || "-"}`,
+        `Provinsi              : ${rec.prov_nama || "-"}`,
+        `Deskripsi Plat        : ${rec.deskripsi_plat || "-"}`,
+      ].join("\n");
+    });
+
+    return lines.join("\n\n");
+  }, [detectedPlates, platRows]);
+
 
   // validasi
   const canNext = useMemo(() => {

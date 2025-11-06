@@ -1,0 +1,184 @@
+.datasw-page {
+  animation: fadeIn 0.5s ease-in;
+}
+
+.datasw-header h1 {
+  font-size: 1.8rem;
+  color: #e5487e;
+  margin-bottom: 0.2rem;
+}
+
+.datasw-header .muted {
+  color: #888;
+  font-size: 0.9rem;
+}
+
+.datasw-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 1rem 0 1.5rem;
+  gap: 1rem;
+}
+
+.datasw-controls input {
+  flex: 1;
+  border: 2px solid #ffd6e7;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.95rem;
+  outline: none;
+  transition: all 0.2s;
+}
+.datasw-controls input:focus {
+  border-color: #ff89b5;
+  box-shadow: 0 0 0 3px rgba(255, 204, 220, 0.4);
+}
+
+.kawaii-btn {
+  background: linear-gradient(135deg, #ffd6e0, #fff0f5);
+  color: #ff4d8e;
+  font-weight: 600;
+  border: 2px solid #ffcce0;
+  border-radius: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.kawaii-btn:hover {
+  transform: translateY(-2px);
+  background: #ffe6ef;
+  color: #ff007f;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  border-radius: 14px;
+  border: 1px solid #ffd6e7;
+  background: linear-gradient(180deg, #fff7fb 0%, #fff 100%);
+  box-shadow: 0 6px 20px rgba(255, 170, 195, 0.2);
+}
+
+.kawaii-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 1000px;
+  font-size: 0.9rem;
+}
+.kawaii-table th {
+  background: linear-gradient(180deg, #fff0f7 0%, #ffe3ef 100%);
+  color: #6b274d;
+  padding: 10px;
+  border-bottom: 2px solid #ffd6e7;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.kawaii-table td {
+  padding: 10px;
+  border-bottom: 1px dashed #ffe3ef;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.kawaii-table tr:nth-child(odd) {
+  background: #fffafc;
+}
+.kawaii-table tr:hover {
+  background: #fff0f6;
+  transition: 0.25s;
+}
+
+.kawaii-table td.alamat {
+  max-width: 300px;
+  white-space: normal;
+}
+.kawaii-table td.mono {
+  font-family: monospace;
+  color: #8b1c4a;
+}
+
+.loading {
+  text-align: center;
+  color: #e84b7a;
+  font-size: 1rem;
+  padding: 2rem;
+}
+
+@keyframes fadeIn {
+  from {opacity: 0; transform: translateY(10px);}
+  to {opacity: 1; transform: translateY(0);}
+}
+
+.datasw-page { animation: fadeIn .4s ease; }
+.datasw-header { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; }
+.datasw-header h1 { font-size: 2rem; color:#e5487e; margin:0; }
+.datasw-header .small { font-size:.85rem; color:#888; }
+
+.dsw-actions { display:flex; gap:.5rem; }
+.kawaii-btn { background: linear-gradient(135deg,#ffd6e0,#fff0f5); color:#ff4d8e; font-weight:700; border:2px solid #ffcce0; border-radius:12px; padding:8px 14px; cursor:pointer; transition: all .2s; }
+.kawaii-btn:hover { transform: translateY(-1px); background:#ffe6ef; color:#ff007f; }
+.kawaii-btn.ghost { background:#fff; }
+
+.datasw-controls.sticky{
+  position: sticky; top: 0; z-index: 5; background: linear-gradient(180deg,#fff7fb 0%, #fff 100%);
+  padding:12px; border-radius:12px; border:1px solid #ffd6e7; box-shadow: 0 4px 16px rgba(255,170,195,.18);
+}
+.datasw-controls .left { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.input-wrap{ display:flex; align-items:center; gap:8px; border:2px solid #ffd6e7; border-radius:12px; padding:8px 12px; min-width:280px; flex:1; background:#fff; }
+.input-wrap input{ border:0; outline:0; width:100%; background:transparent; font-size:.98rem; }
+.input-wrap:focus-within{ border-color:#ff89b5; box-shadow:0 0 0 3px rgba(255,204,220,.4); }
+.input-wrap .ico{ opacity:.6 }
+
+.chips{ display:flex; gap:8px; flex-wrap:wrap; }
+.chip{ padding:8px 12px; border-radius:999px; border:2px solid #ffd6e7; background:#fff; font-weight:800; color:#6b274d; cursor:pointer; }
+.chip.active{ background:#fff0f7; border-color:#ffb3cf; color:#a31a5b; }
+
+.table-wrap {
+  overflow: auto; border-radius: 14px; border: 1px solid #ffd6e7;
+  background: linear-gradient(180deg, #fff7fb 0%, #fff 100%);
+  box-shadow: 0 6px 20px rgba(255,170,195,.2);
+}
+.kawaii-table { width:100%; border-collapse:separate; border-spacing:0; min-width:1000px; font-size:.92rem; }
+.kawaii-table thead th{
+  position: sticky; top: 0; z-index: 1;
+  background: linear-gradient(180deg, #fff0f7 0%, #ffe3ef 100%);
+  color:#6b274d; padding:10px; border-bottom:2px solid #ffd6e7;
+}
+.kawaii-table td{ padding:10px; border-bottom:1px dashed #ffe3ef; vertical-align:top; }
+.kawaii-table tr:nth-child(odd){ background:#fffafc; }
+.kawaii-table tr:hover{ background:#fff0f6; transition:.2s; }
+.kawaii-table td.alamat{ max-width: 360px; white-space: normal; }
+.kawaii-table td.mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#8b1c4a; }
+
+.gol-badge{
+  display:inline-flex; align-items:center; justify-content:center; min-width:36px;
+  padding:4px 8px; border-radius:999px; border:2px solid #ffcfe0; background:#fff0f7; color:#a31a5b; font-weight:800; font-size:.85rem;
+}
+
+.hl{ background:#ffecf5; padding:0 .15em; border-radius:.25em; }
+
+.loading { text-align:center; color:#e84b7a; font-size:1rem; padding:2rem; }
+
+@keyframes fadeIn { from{opacity:0; transform: translateY(8px)} to{opacity:1; transform:none} }
+
+.pager{
+  display:flex; justify-content:space-between; align-items:center;
+  gap:12px; padding:10px 12px; margin:8px 0;
+  border:1px solid #ffd6e7; border-radius:12px; background:#fff8fc;
+}
+.pager-left{ display:flex; gap:12px; align-items:center; flex-wrap:wrap }
+.pager .range{ font-weight:700; color:#a31a5b }
+.page-size{ display:flex; align-items:center; gap:6px; color:#6b274d; font-weight:700 }
+.page-size select{
+  border:2px solid #ffd6e7; border-radius:10px; padding:6px 10px; background:#fff; outline:0;
+}
+.pager-right{ display:flex; align-items:center; gap:6px; }
+.pg-btn{
+  border:2px solid #ffcfe0; background:linear-gradient(180deg,#ffdbe7,#ffeef5);
+  padding:6px 10px; border-radius:10px; cursor:pointer; font-weight:800; color:#a31a5b;
+  box-shadow:0 4px 12px rgba(255,170,195,.25);
+}
+.pg-btn:disabled{ opacity:.5; cursor:not-allowed; }
+.pg-btn:not(:disabled):hover{ transform:translateY(-1px); transition:.15s }
+.page-num{ font-weight:800; color:#6b274d; padding:0 6px }
