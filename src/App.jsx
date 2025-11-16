@@ -1,13 +1,13 @@
 // src/App.jsx
 import { Routes, Route, NavLink, useLocation, Navigate } from "react-router-dom";
 
-import SpaHero from "./components/SpaHero.jsx";     // landing public
+import SpaHero from "./components/SpaHero.jsx";
 import Home from "./pages/Home.jsx";
 
-import FormPage from "./pages/pages/FormPage.jsx";        // <- HALAMAN FORM (buat baru)
-import DataForm from "./pages/DataForm.jsx";        // <- Rekap Data Form (sidebar / internal)
-import StatusProses from "./pages/StatusProses.jsx";// <- HALAMAN PUBLIK (di luar sidebar)
-
+import FormPage from "./pages/pages/FormPage.jsx";
+import DataForm from "./pages/DataForm.jsx";
+import StatusProses from "./pages/StatusProses.jsx";
+import DokumenPage from "./pages/DokumenPage.jsx";
 import Registrasi from "./pages/Registrasi.jsx";
 import PrivateRoute from "./auth/PrivateRoute";
 import SidebarLayout from "./layouts/SidebarLayout.jsx";
@@ -15,15 +15,12 @@ import DataPks from "./pages/DataPks.jsx";
 import DataAhliWaris from "./pages/DataAhliWaris.jsx";
 import DataWaris from "./pages/DataWaris.jsx";
 import DataSW from "./pages/DataSW.jsx";
-
-// role-spesifik
 import VerifikatorDashboard from "./pages/VerifikatorDashboard.jsx";
 import Verifikator from "./pages/Verifikator.jsx";
 
 export default function App() {
   const loc = useLocation();
 
-  // Halaman internal (pakai SidebarLayout) -> sembunyikan navbar atas
   const HIDE_ON = ["/home", "/dataform", "/datapks", "/data-ahli-waris", "/data-waris", "/verifikator", "/datasw"];
   const showNavbar = !HIDE_ON.some((p) => loc.pathname.startsWith(p));
 
@@ -41,8 +38,8 @@ export default function App() {
 
           <nav className="nav-links">
             <NavLink to="/" end className="nav-link">Dashboard</NavLink>
+            {/* <NavLink to="/dokumen" end className="nav-link">Dokumen</NavLink> */}
             <NavLink to="/form" end className="nav-link">Form</NavLink>
-            {/* Tetap ke /status (tanpa id) sebagai halaman publik; rute dengan id juga disiapkan */}
             <NavLink to="/status" className="nav-link">Status Proses</NavLink>
           </nav>
 
@@ -56,6 +53,7 @@ export default function App() {
           <Route path="/" element={<SpaHero />} />
           <Route path="/form" element={<FormPage />} />
           <Route path="/registrasi" element={<Registrasi />} />
+          <Route path="/dokumen" element={<DokumenPage/>} />
 
           {/* Status publik: dukung tanpa dan dengan :requestId */}
           <Route path="/status" element={<StatusProses />} />

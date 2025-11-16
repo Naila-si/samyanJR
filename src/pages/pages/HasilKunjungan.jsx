@@ -250,7 +250,7 @@ export default function HasilKunjungan({
       v.rumahSakit.trim() &&
       v.tanggalKecelakaan.trim() &&
       v.tglMasukRS.trim() &&
-      v.tglJamNotifikasi.trim() &&
+      // v.tglJamNotifikasi.trim() &&
       v.tglJamKunjungan.trim() && !!v.petugasTtd,
     [v]
   );
@@ -620,36 +620,78 @@ export default function HasilKunjungan({
               multiple
               onChange={onUploadFoto}
             />
+
             {fotoList.length > 0 ? (
-              fotoList.map((f, i) => {
-                const src = f.dataURL || null;
-                return (
-                  <div className="thumb" key={i}>
-                    {src ? (
-                      <img
-                        src={src}
-                        alt={f.name}
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  marginTop: "10px",
+                }}
+              >
+                {fotoList.map((f, i) => {
+                  const src = f.dataURL || null;
+                  return (
+                    <div
+                      className="thumb"
+                      key={i}
+                      style={{
+                        width: "120px",
+                        border: "1px solid #ddd",
+                        borderRadius: "8px",
+                        padding: "8px",
+                        textAlign: "center",
+                        background: "#fff",
+                      }}
+                    >
+                      {src ? (
+                        <img
+                          src={src}
+                          alt={f.name}
+                          style={{
+                            width: "100%",
+                            height: "100px",
+                            objectFit: "cover",
+                            borderRadius: "4px",
+                          }}
+                        />
+                      ) : (
+                        <div style={{ padding: "1rem", color: "#888" }}>
+                          Tidak ada preview
+                        </div>
+                      )}
+                      <div
+                        className="tname"
+                        title={f.name}
                         style={{
-                          width: "100%",
-                          height: "100px",
-                          objectFit: "cover",
-                          borderRadius: "0.25rem",
+                          fontSize: "12px",
+                          marginTop: "4px",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
-                      />
-                    ) : (
-                      <div style={{ padding: "1rem", color: "#888" }}>
-                        Tidak ada preview
+                      >
+                        {f.name}
                       </div>
-                    )}
-                    <div className="tname" title={f.name}>
-                      {f.name}
+                      <button
+                        className="btn small"
+                        onClick={() => removeFoto(i)}
+                        style={{
+                          background: "#fdd",
+                          border: "1px solid #f99",
+                          color: "#333",
+                          borderRadius: "5px",
+                          marginTop: "6px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Hapus
+                      </button>
                     </div>
-                    <button className="btn small" onClick={() => removeFoto(i)}>
-                      Hapus
-                    </button>
-                  </div>
-                );
-              })
+                  );
+                })}
+              </div>
             ) : (
               <div style={{ padding: "1rem", color: "#888" }}>Belum ada foto</div>
             )}

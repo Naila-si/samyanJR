@@ -466,6 +466,36 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
 
   const handleNext = () => {
     if (!canNext) return alert("Lengkapi isian & lampiran wajib terlebih dahulu.");
+    
+    console.log("🔍 DATA SUMBER INFORMASI sebelum save:");
+    console.log("   - Jumlah sumbers:", sumbers.length);
+    
+    sumbers.forEach((sumber, index) => {
+      console.log(`   - Sumber ${index + 1}:`, {
+        identitas: sumber.identitas,
+        hasFoto: !!sumber.foto,
+        fotoIsArray: Array.isArray(sumber.foto),
+        fotoLength: sumber.foto?.length || 0,
+        fotoStructure: sumber.foto?.map(f => ({
+          hasFile: !!f.file,
+          hasDataURL: !!f.dataURL,
+          name: f.name
+        }))
+      });
+    });
+
+     const nextData = { 
+        ...data, 
+        sumbers,
+        attachSurvey: att
+      };
+
+    // ✅ DEBUG: Cek data sebelum save
+    console.log("🔍 DATA sebelum saveSurveyToSupabase:");
+    console.log("   - attachSurvey:", data.attachSurvey);
+    console.log("   - attachSurvey.fotoSurvey:", data.attachSurvey?.fotoSurvey);
+    console.log("   - fotoSurveyList:", data.fotoSurveyList);
+    
     setData?.({ ...data, sumbers });
     playBeep?.();
     next?.();
@@ -496,8 +526,8 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       <section className="card">
         <div className="row">
           <div>
-            <label className="label">No. LP</label>
-            <input className="input" value={v.noPL} onChange={set("noPL")} placeholder="LP/...." />
+            <label className="label">No. PL</label>
+            <input className="input" value={v.noPL} onChange={set("noPL")} placeholder="PL/...." />
           </div>
           <div>
             <label className="label">Hari/Tanggal Survei</label>
@@ -620,7 +650,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         <div className="table-like">
           <div className="th">No</div>
           <div className="th">Identitas/Detil Sumber Informasi & Metode Perolehan</div>
-          <div className="th">Foto (Survei / Saksi Mata)</div>
+          <div className="th">Foto (TTD (PNG) / Saksi Mata)</div>
 
           {sumbers.map((r, idx) => (
             <React.Fragment key={r.id}>
@@ -641,29 +671,40 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                   type="file"
                   accept="image/*"
                   multiple
-                  onChange={(e) => {
+                  onChange={async (e) => {
                     const files = Array.from(e.target.files || []);
-                    Promise.all(
-                      files.map(
-                        (f) =>
-                          new Promise((res) => {
-                            const reader = new FileReader();
-                            reader.onload = () => res(reader.result);
-                            reader.onerror = () => res("");
-                            reader.readAsDataURL(f);
-                          })
-                      )
-                    ).then((list) => setRow(r.id, "foto", list.filter(Boolean)));
+                    const fotoObjects = await Promise.all(
+                      files.map(async (f) => {
+                        const dataURL = await new Promise((resolve) => {
+                          const reader = new FileReader();
+                          reader.onload = () => resolve(reader.result);
+                          reader.onerror = () => resolve("");
+                          reader.readAsDataURL(f);
+                        });
+                        
+                        // ✅ FORMAT YANG DIHARAPKAN oleh saveSurveyToSupabase
+                        return {
+                          file: f,                    // File object
+                          dataURL: dataURL,           // Data URL untuk preview
+                          name: f.name,               // Nama file
+                          size: f.size,               // Ukuran file
+                          type: f.type                // Tipe file
+                        };
+                      })
+                    );
+                    
+                    // Simpan dengan format yang benar
+                    setRow(r.id, "foto", fotoObjects.filter(Boolean));
                   }}
                 />
 
                 {/* Preview foto */}
                 {r.foto && Array.isArray(r.foto) && r.foto.length > 0 && (
                   <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                    {r.foto.map((img, i) => (
+                    {r.foto.map((fotoObj, i) => (
                       <img
                         key={i}
-                        src={img}
+                        src={fotoObj.dataURL || fotoObj} // Support both old and new format
                         alt={`foto-${i}`}
                         style={{ width: "80px", height: "auto", borderRadius: 6, border: "1px solid #ccc" }}
                       />
@@ -751,55 +792,175 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       {/* LAMPIRAN */}
       <section className="card">
         <div className="label">Lampiran</div>
+
         {sifatCidera === "MD" && (
           <div className="grid-attach">
-            <FilePick label="KTP" onPick={(f) => setAtt({ ...att, ktp: f })} file={att.ktp} />
-            {att.ktp && <button onClick={() => setAtt({ ...att, ktp: null })} className="btn-delete">Hapus</button>}
+            {/* KTP */}
+            <div className="attach">
+              <FilePick
+                label="KTP"
+                onPick={(f) => setAtt({ ...att, ktp: f })}
+                file={att.ktp}
+              />
+              {att.ktp?.url && (
+                <div className="preview">
+                  <img src={att.ktp.url} alt="KTP" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, ktp: null })}
+                    aria-label="Hapus KTP"
+                  >✕</button>
+                </div>
+              )}
+            </div>
 
-            <FilePick label="Buku Tabungan" onPick={(f) => setAtt({ ...att, bukuTabungan: f })} file={att.bukuTabungan} />
-            {att.bukuTabungan && <button onClick={() => setAtt({ ...att, bukuTabungan: null })} className="btn-delete">Hapus</button>}
+            {/* Buku Tabungan */}
+            <div className="attach">
+              <FilePick
+                label="Buku Tabungan"
+                onPick={(f) => setAtt({ ...att, bukuTabungan: f })}
+                file={att.bukuTabungan}
+              />
+              {att.bukuTabungan?.url && (
+                <div className="preview">
+                  <img src={att.bukuTabungan.url} alt="Buku Tabungan" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, bukuTabungan: null })}
+                    aria-label="Hapus Buku Tabungan"
+                  >✕</button>
+                </div>
+              )}
+            </div>
 
-            <FilePick label="Formulir Pengajuan Santunan" onPick={(f) => setAtt({ ...att, formPengajuan: f })} file={att.formPengajuan} />
-            {att.formPengajuan && <button onClick={() => setAtt({ ...att, formPengajuan: null })} className="btn-delete">Hapus</button>}
+            {/* Formulir Pengajuan Santunan */}
+            <div className="attach">
+              <FilePick
+                label="Formulir Pengajuan Santunan"
+                onPick={(f) => setAtt({ ...att, formPengajuan: f })}
+                file={att.formPengajuan}
+              />
+              {att.formPengajuan?.url && (
+                <div className="preview">
+                  <img src={att.formPengajuan.url} alt="Formulir Pengajuan Santunan" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, formPengajuan: null })}
+                    aria-label="Hapus Formulir Pengajuan Santunan"
+                  >✕</button>
+                </div>
+              )}
+            </div>
 
-            <FilePick label="Formulir Keterangan Ahli Waris" onPick={(f) => setAtt({ ...att, formKeteranganAW: f })} file={att.formKeteranganAW} />
-            {att.formKeteranganAW && <button onClick={() => setAtt({ ...att, formKeteranganAW: null })} className="btn-delete">Hapus</button>}
+            {/* Formulir Keterangan Ahli Waris */}
+            <div className="attach">
+              <FilePick
+                label="Formulir Keterangan Ahli Waris"
+                onPick={(f) => setAtt({ ...att, formKeteranganAW: f })}
+                file={att.formKeteranganAW}
+              />
+              {att.formKeteranganAW?.url && (
+                <div className="preview">
+                  <img src={att.formKeteranganAW.url} alt="Formulir Keterangan Ahli Waris" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, formKeteranganAW: null })}
+                    aria-label="Hapus Formulir Keterangan Ahli Waris"
+                  >✕</button>
+                </div>
+              )}
+            </div>
 
-            <FilePick label="Surat Keterangan Kematian" onPick={(f) => setAtt({ ...att, skKematian: f })} file={att.skKematian} />
-            {att.skKematian && <button onClick={() => setAtt({ ...att, skKematian: null })} className="btn-delete">Hapus</button>}
+            {/* Surat Keterangan Kematian */}
+            <div className="attach">
+              <FilePick
+                label="Surat Keterangan Kematian"
+                onPick={(f) => setAtt({ ...att, skKematian: f })}
+                file={att.skKematian}
+              />
+              {att.skKematian?.url && (
+                <div className="preview">
+                  <img src={att.skKematian.url} alt="Surat Keterangan Kematian" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, skKematian: null })}
+                    aria-label="Hapus Surat Keterangan Kematian"
+                  >✕</button>
+                </div>
+              )}
+            </div>
 
-            <FilePick label="Kartu Keluarga (KK)" onPick={(f) => setAtt({ ...att, kk: f })} file={att.kk} />
-            {att.kk && <button onClick={() => setAtt({ ...att, kk: null })} className="btn-delete">Hapus</button>}
+            {/* Kartu Keluarga (KK) */}
+            <div className="attach">
+              <FilePick
+                label="Kartu Keluarga (KK)"
+                onPick={(f) => setAtt({ ...att, kk: f })}
+                file={att.kk}
+              />
+              {att.kk?.url && (
+                <div className="preview">
+                  <img src={att.kk.url} alt="Kartu Keluarga" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, kk: null })}
+                    aria-label="Hapus Kartu Keluarga"
+                  >✕</button>
+                </div>
+              )}
+            </div>
 
-            <FilePick label="Akta Kelahiran" onPick={(f) => setAtt({ ...att, aktaKelahiran: f })} file={att.aktaKelahiran} />
-            {att.aktaKelahiran && <button onClick={() => setAtt({ ...att, aktaKelahiran: null })} className="btn-delete">Hapus</button>}
+            {/* Akta Kelahiran */}
+            <div className="attach">
+              <FilePick
+                label="Akta Kelahiran"
+                onPick={(f) => setAtt({ ...att, aktaKelahiran: f })}
+                file={att.aktaKelahiran}
+              />
+              {att.aktaKelahiran?.url && (
+                <div className="preview">
+                  <img src={att.aktaKelahiran.url} alt="Akta Kelahiran" />
+                  <button
+                    className="btn-delete-thumb"
+                    onClick={() => setAtt({ ...att, aktaKelahiran: null })}
+                    aria-label="Hapus Akta Kelahiran"
+                  >✕</button>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
         {/* FOTO SURVEY */}
         <div style={{ marginTop: 10 }}>
           <label className="label">Foto Survey (boleh banyak, tanpa batas)</label>
-          <input type="file" accept="image/*" multiple onChange={(e) => pushFotos(e.target.files)} />
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={(e) => pushFotos(e.target.files)}
+          />
           {!!(att.fotoSurvey || []).length && (
             <div className="thumbs">
               {(att.fotoSurvey || []).map((x, i) => (
-                <div key={i} style={{ position: "relative" }}>
+                <div key={i} className="preview">
                   <img src={x.url} alt={x.name} />
                   <button
                     className="btn-delete-thumb"
                     onClick={() =>
-                      setAtt({ ...att, fotoSurvey: att.fotoSurvey.filter((_, idx) => idx !== i) })
+                      setAtt({
+                        ...att,
+                        fotoSurvey: att.fotoSurvey.filter((_, idx) => idx !== i),
+                      })
                     }
-                  >
-                    ✕
-                  </button>
+                    aria-label="Hapus foto"
+                  >✕</button>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* MAP SCREENSHOT */}
+        {/* SS Peta / Map */}
         <div style={{ marginTop: 10 }}>
           <label className="label">SS Peta / Map</label>
           <input
@@ -813,14 +974,19 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
             }}
           />
           {att.mapSS?.url && (
-            <div className="thumbs" style={{ marginTop: 8 }}>
-              <img src={att.mapSS.url} alt="SS Map" />
-              <button onClick={() => setAtt({ ...att, mapSS: null })} className="btn-delete">Hapus</button>
+            <div className="thumbs">
+              <div className="preview">
+                <img src={att.mapSS.url} alt="SS Map" />
+                <button
+                  className="btn-delete-thumb"
+                  onClick={() => setAtt({ ...att, mapSS: null })}
+                >✕</button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* BARCODE */}
+        {/* Barcode / QR */}
         <div style={{ marginTop: 10 }}>
           <label className="label">Barcode / QR</label>
           <input
@@ -834,14 +1000,19 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
             }}
           />
           {att.barcode?.url && (
-            <div className="thumbs" style={{ marginTop: 8 }}>
-              <img src={att.barcode.url} alt="Barcode/QR" />
-              <button onClick={() => setAtt({ ...att, barcode: null })} className="btn-delete">Hapus</button>
+            <div className="thumbs">
+              <div className="preview">
+                <img src={att.barcode.url} alt="Barcode/QR" />
+                <button
+                  className="btn-delete-thumb"
+                  onClick={() => setAtt({ ...att, barcode: null })}
+                >✕</button>
+              </div>
             </div>
           )}
         </div>
 
-        {/* TTD PETUGAS */}
+        {/* TTD Petugas */}
         <div style={{ marginTop: 10 }}>
           <label className="label">TTD Petugas (PNG, latar transparan disarankan)</label>
           <input
@@ -859,9 +1030,14 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
             }}
           />
           {att.petugasTtd?.url && (
-            <div className="ttd-preview">
-              <img src={att.petugasTtd.url} alt="TTD Petugas" />
-              <button onClick={() => setAtt({ ...att, petugasTtd: null })} className="btn-delete">Hapus</button>
+            <div className="thumbs">
+              <div className="preview preview--wide">{/* lebih lebar utk tanda tangan */}
+                <img src={att.petugasTtd.url} alt="TTD Petugas" />
+                <button
+                  className="btn-delete-thumb"
+                  onClick={() => setAtt({ ...att, petugasTtd: null })}
+                >✕</button>
+              </div>
             </div>
           )}
         </div>
@@ -1274,7 +1450,7 @@ const css = `
   transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
 }
 .btn-delete-thumb{ font-size: 0; }
-.btn-delete-thumb::before{ content: "🩷 Hapus"; font-size: 12px; }
+.btn-delete-thumb::before{ content: "Hapus"; font-size: 12px; }
 .btn-delete-thumb:hover{
   transform: translateY(-1px);
   box-shadow: 0 12px 24px rgba(243, 182, 178, .42), inset 0 1px 0 rgba(255,255,255,.7);
@@ -1304,4 +1480,83 @@ const css = `
 .btn-delete:hover{ transform: translateY(-1px) }
 .btn-delete:active{ transform: translateY(0); filter: brightness(.97) }
 .btn-delete:focus-visible{ outline: 0; box-shadow: 0 0 0 3px rgba(247,199,196,.55) }
+/* Grid responsif untuk daftar lampiran */
+.grid-attach{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+/* Satu item lampiran (FilePick + preview (opsional)) */
+.attach{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Container thumbnails (foto banyak / single) */
+.thumbs{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+/* Kartu preview gambar */
+.preview{
+  position: relative;
+  width: 140px;
+  height: 140px;
+  border-radius: 12px;
+  border: 1px solid #eee;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.preview img{
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Khusus tanda tangan lebih melebar */
+.preview.preview--wide{
+  width: 220px;
+  height: 110px;
+}
+
+/* Tombol hapus kecil di pojok */
+.btn-delete-thumb{
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #f3a9b2;
+  background: #ffd6dc;
+  color: #333;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,.12);
+}
+
+/* Kalau masih pakai .btn-delete lama, cegah jadi full-width */
+.btn-delete{
+  width: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+/* Opsional: kecilkan grid di layar sempit */
+@media (max-width: 480px){
+  .grid-attach{
+    grid-template-columns: 1fr;
+  }
+}
 `;

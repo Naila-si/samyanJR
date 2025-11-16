@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 )
 
-const BUCKET = 'laporan_survei' // ganti sesuai nama bucket kamu
+const BUCKET = 'foto-survey'
 
 async function toSignedUrl(path) {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 600)

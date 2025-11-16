@@ -240,7 +240,7 @@ const validateStep = useCallback(() => {
           "lokasiKecelakaan",
           "tglKecelakaan",
           "tglMasukRS",
-          "tglJamNotifikasi",
+          // "tglJamNotifikasi",
         ];
         const missing = requiredKunjunganFields.filter((key) => !data[key]?.trim());
         if (missing.length > 0) {

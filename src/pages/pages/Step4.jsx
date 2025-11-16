@@ -4,6 +4,114 @@ import { supabase } from "../../lib/supabaseClient";
 import { toast } from "react-hot-toast";
 import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
 
+// Map jenis dokumen ke folder
+const DOKUMEN_FOLDER_MAP = {
+  ktp: 'ktp',
+  kk: 'kk', 
+  bukuTabungan: 'buku-tabungan',
+  formPengajuan: 'form-pengajuan',
+  formKeteranganAW: 'form-ahli-waris',
+  skKematian: 'surat-kematian',
+  aktaKelahiran: 'akta-kelahiran'
+  // fotoSurvey & ttdPetugas TIDAK DIMASUKKAN biar gak ganggu function lama
+};
+
+// Function upload dokumen KTP, KK, dll
+async function uploadDokumenKhusus(file, jenisDokumen, recordId) {
+  try {
+    // Generate unique filename
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${timestamp}_${randomStr}_${jenisDokumen}.${fileExt}`;
+    
+    // Dapatkan folder dari map
+    const folder = DOKUMEN_FOLDER_MAP[jenisDokumen];
+    if (!folder) {
+      throw new Error(`Jenis dokumen tidak valid: ${jenisDokumen}`);
+    }
+    
+    const path = `${folder}/${fileName}`;
+    
+    console.log(`📤 Uploading ${jenisDokumen} ke ${path}...`);
+    
+    // Upload ke Supabase
+    const { data, error } = await supabase.storage
+      .from('foto-survey')
+      .upload(path, file);
+    
+    if (error) {
+      console.error(`❌ Upload gagal untuk ${jenisDokumen}:`, error);
+      throw error;
+    }
+    
+    // Generate public URL
+    const { data: urlData } = supabase.storage
+      .from('foto-survey')
+      .getPublicUrl(path);
+    
+    const result = {
+      fileName: fileName,
+      path: path,
+      url: urlData.publicUrl,
+      jenis: jenisDokumen,
+      folder: folder,
+      uploadedAt: new Date().toISOString(),
+      size: file.size,
+      type: file.type
+    };
+    
+    console.log(`✅ ${jenisDokumen} berhasil diupload:`, result.url);
+    return result;
+    
+  } catch (error) {
+    console.error(`❌ Error upload ${jenisDokumen}:`, error);
+    throw error;
+  }
+}
+
+// Upload semua dokumen KTP, KK, dll dari form
+async function uploadSemuaDokumen(formData, recordId) {
+  const results = {
+    success: [],
+    failed: []
+  };
+  
+  console.log('📦 Processing dokumen untuk upload:', Object.keys(formData));
+  
+  // Upload setiap dokumen yang ada
+  for (const [jenisDokumen, file] of Object.entries(formData)) {
+    // Hanya proses dokumen yang ada di DOKUMEN_FOLDER_MAP
+    if (file && DOKUMEN_FOLDER_MAP[jenisDokumen]) {
+      try {
+        console.log(`🔄 Processing ${jenisDokumen}...`);
+        const result = await uploadDokumenKhusus(file, jenisDokumen, recordId);
+        results.success.push({
+          jenis: jenisDokumen,
+          data: result
+        });
+        console.log(`✅ ${jenisDokumen} berhasil diupload`);
+      } catch (error) {
+        results.failed.push({
+          jenis: jenisDokumen,
+          error: error.message
+        });
+        console.log(`❌ ${jenisDokumen} gagal:`, error.message);
+      }
+    } else {
+      console.log(`⏭️ Skip ${jenisDokumen} - bukan dokumen target`);
+    }
+  }
+  
+  console.log('📊 Upload Summary:', {
+    success: results.success.length,
+    failed: results.failed.length,
+    totalProcessed: results.success.length + results.failed.length
+  });
+  
+  return results;
+}
+
 export default function Step4({ data, setData, back, next }) {
   const [att, setAtt] = useState(data.attachSurvey || {});
   const [surveyStatus, setSurveyStatus] = useState([]);
@@ -23,6 +131,12 @@ export default function Step4({ data, setData, back, next }) {
         v === true ||
         (typeof v === "string" && (v.includes("✔") || v.includes("✅")))
     );
+
+  useEffect(() => {
+      console.log("🔄 STEP4 - Data berubah:");
+      console.log("📸 attachSurvey:", data.attachSurvey);
+      console.log("📸 fotoSurvey:", data.attachSurvey?.fotoSurvey);
+  }, [data.attachSurvey]);
 
   // 🧩 Sinkronisasi lampiran ke data global
   useEffect(() => {
@@ -78,121 +192,224 @@ export default function Step4({ data, setData, back, next }) {
       ((data.sifatCidera?.toUpperCase() === "LL" || data.sifatCidera?.toUpperCase() === "LUKA-LUKA") && dokumenOkLL)
     );
 
-  // ✅ Versi aman & fleksibel
-  async function uploadFotoToStorage(supabase, fileOrDataUrl, folder = "foto-survey") {
+  async function uploadFotoToStorage(supabase, fileOrDataUrl, folder = "survey-images") {
     const BUCKET_NAME = "foto-survey";
 
+    // Jika sudah URL, langsung return
     if (typeof fileOrDataUrl === "string" && /^https?:\/\//.test(fileOrDataUrl)) {
-      return fileOrDataUrl;
+        return fileOrDataUrl;
     }
 
     let body;
     let contentType = "application/octet-stream";
     let ext = "bin";
+    let originalName = "file";
 
+    // Handle Data URL
     if (typeof fileOrDataUrl === "string" && fileOrDataUrl.startsWith("data:")) {
-      const [header, base64] = fileOrDataUrl.split(",");
-      const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
-      contentType = mime;
-      ext = mime.split("/")[1] || "jpg";
-      const binary = typeof atob === "function" ? atob(base64) : Buffer.from(base64, "base64").toString("binary");
-      const len = binary.length;
-      const u8 = new Uint8Array(len);
-      for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
-      body = u8;
-    } else if (typeof File !== "undefined" && fileOrDataUrl instanceof File) {
-      body = fileOrDataUrl;
-      contentType = fileOrDataUrl.type || "application/octet-stream";
-      const name = fileOrDataUrl.name || "";
-      ext = (name.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
-    } else if (fileOrDataUrl?.file && typeof File !== "undefined" && fileOrDataUrl.file instanceof File) {
-      const f = fileOrDataUrl.file;
-      body = f;
-      contentType = f.type || "application/octet-stream";
-      const name = f.name || "";
-      ext = (name.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
+        const [header, base64] = fileOrDataUrl.split(",");
+        const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
+        contentType = mime;
+        ext = mime.split("/")[1] || "jpg";
+        const binary = typeof atob === "function" ? atob(base64) : Buffer.from(base64, "base64").toString("binary");
+        const len = binary.length;
+        const u8 = new Uint8Array(len);
+        for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
+        body = u8;
+        originalName = `foto_${Date.now()}.${ext}`;
+    } 
+    // Handle File object langsung
+    else if (typeof File !== "undefined" && fileOrDataUrl instanceof File) {
+        body = fileOrDataUrl;
+        contentType = fileOrDataUrl.type || "application/octet-stream";
+        originalName = fileOrDataUrl.name || "file";
+        ext = (originalName.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
+    } 
+    // Handle object dengan property file
+    else if (fileOrDataUrl?.file && typeof File !== "undefined" && fileOrDataUrl.file instanceof File) {
+        const f = fileOrDataUrl.file;
+        body = f;
+        contentType = f.type || "application/octet-stream";
+        originalName = f.name || fileOrDataUrl.name || "file";
+        ext = (originalName.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
+    } 
+    // Handle object dengan dataURL
+    else if (fileOrDataUrl?.dataURL && typeof fileOrDataUrl.dataURL === "string") {
+        return uploadFotoToStorage(supabase, fileOrDataUrl.dataURL, folder);
     } else {
-      console.warn("Format foto tidak dikenal:", fileOrDataUrl);
-      return null;
+        console.warn("Format foto tidak dikenal:", fileOrDataUrl);
+        return null;
     }
 
+    // Generate safe file path
     const safeFolder = folder.replace(/^\/+|\/+$/g, "");
-    const filePath = `${safeFolder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).slice(2, 9);
+    const safeName = originalName.replace(/[^a-zA-Z0-9.-]/g, "_");
+    const filePath = `${safeFolder}/${timestamp}_${randomId}_${safeName}`;
 
-    const { error: uploadError } = await supabase
-      .storage
-      .from(BUCKET_NAME)        // <- konsisten pakai variabel
-      .upload(filePath, body, { contentType });
+    try {
+        console.log(`📤 Uploading to: ${filePath}, type: ${contentType}`);
 
-    if (uploadError) {
-      console.error("Upload error:", uploadError);
-      throw uploadError;
+        const { data: uploadData, error: uploadError } = await supabase
+            .storage
+            .from(BUCKET_NAME)
+            .upload(filePath, body, { 
+                contentType,
+                upsert: false
+            });
+
+        if (uploadError) {
+            console.error("❌ Upload error:", uploadError);
+            throw uploadError;
+        }
+
+        // Get public URL
+        const { data: pubData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
+        const publicUrl = pubData?.publicUrl;
+        
+        if (publicUrl) {
+            console.log("✅ Upload successful:", publicUrl);
+            return {
+                url: publicUrl,
+                path: filePath,
+                name: originalName,
+                fileName: `${timestamp}_${randomId}_${safeName}`,
+                uploadedAt: new Date().toISOString(),
+                size: body.size || body.length || 0,
+                type: contentType
+            };
+        }
+
+        throw new Error("Failed to get public URL");
+
+    } catch (error) {
+        console.error("❌ Upload failed:", error);
+        throw error;
     }
-
-    const { data: pub } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
-    const publicUrl = pub?.publicUrl;
-    if (publicUrl) return publicUrl;
-
-    const { data: signed, error: signErr } = await supabase
-      .storage
-      .from(BUCKET_NAME)
-      .createSignedUrl(filePath, 60 * 60);
-    if (signErr) throw signErr;
-    return signed?.signedUrl || null;
   }
 
   // 🖨️ Fungsi Download / Cetak HTML (versi Kunjungan RS)
   async function saveKunjunganToSupabase(data) {
     try {
-      // 1) Upload semua foto -> jadi array URL
-      const fotoSurveyList = Array.isArray(data.fotoSurveyList) ? data.fotoSurveyList : [];
-      const uploadedUrls = [];
-      for (const f of fotoSurveyList) {
-        const url = await uploadFotoToStorage(supabase, f, "foto-survey");
-        if (url) uploadedUrls.push({ name: f?.name || "f", url });
-      }
+        console.log("💾 Starting save process...", data);
 
-      // 2) Upload TTD kalau masih dataURL
-      let ttdUrl = data.petugasTtd;
-      if (ttdUrl && typeof ttdUrl === "string" && ttdUrl.startsWith("data:")) {
-        ttdUrl = await uploadFotoToStorage(supabase, ttdUrl, "ttd-petugas");
-      }
+        // 1) Upload semua foto survey dengan error handling yang lebih baik
+        const fotoSurveyList = Array.isArray(data.fotoSurveyList) ? data.fotoSurveyList : [];
+        const uploadedFotos = [];
 
-      // 3) Normalisasi tanggal (kalau masih Date)
-      const toIso = (v) =>
-        v instanceof Date ? v.toISOString() : (typeof v === "string" ? v : null);
+        if (fotoSurveyList.length > 0) {
+            console.log(`📸 Processing ${fotoSurveyList.length} photos...`);
+            
+            for (const [index, foto] of fotoSurveyList.entries()) {
+                try {
+                    console.log(`🔄 Uploading photo ${index + 1}/${fotoSurveyList.length}:`, foto);
+                    
+                    const uploadResult = await uploadFotoToStorage(supabase, foto, "survey-images");
+                    
+                    if (uploadResult) {
+                        uploadedFotos.push(uploadResult);
+                        console.log(`✅ Photo ${index + 1} uploaded successfully`);
+                    } else {
+                        console.warn(`⚠️ Photo ${index + 1} upload returned null`);
+                    }
+                } catch (fotoError) {
+                    console.error(`❌ Failed to upload photo ${index + 1}:`, fotoError);
+                    // Continue dengan foto berikutnya meskipun satu gagal
+                    continue;
+                }
+            }
+        } else {
+            console.log("ℹ️ No photos to upload");
+        }
 
-      const payload = {
-        petugas: data.petugas,
-        petugas_jabatan: "Petugas Pelayanan",
-        wilayah: data.wilayah,
-        korban: data.korban,
-        rumah_sakit: data.rumahSakit,
-        lokasi_kecelakaan: data.lokasiKecelakaan,
-        tanggal_kecelakaan: toIso(data.tanggalKecelakaan),
-        tgl_masuk_rs: toIso(data.tglMasukRS),
-        tgl_jam_notifikasi: toIso(data.tglJamNotifikasi),
-        tgl_jam_kunjungan: toIso(data.tglJamKunjungan),
-        uraian: data.uraianKunjungan,
-        rekomendasi: data.rekomendasi,
-        petugas_ttd: ttdUrl || null,
-        foto_survey: uploadedUrls, 
-      };
+        // 2) Upload TTD petugas
+        let ttdUrl = data.petugasTtd;
+        let ttdMetadata = null;
+        
+        if (ttdUrl && typeof ttdUrl === "string" && ttdUrl.startsWith("data:")) {
+            console.log("🖊️ Uploading TTD...");
+            try {
+                ttdMetadata = await uploadFotoToStorage(supabase, ttdUrl, "ttd-petugas");
+                ttdUrl = ttdMetadata?.url || ttdUrl;
+                console.log("✅ TTD uploaded successfully");
+            } catch (ttdError) {
+                console.error("❌ TTD upload failed:", ttdError);
+                // Tetap lanjut tanpa TTD
+            }
+        }
 
-      const { data: inserted, error } = await supabase
-        .from("form_kunjungan_rs")
-        .insert(payload)
-        .select()
-        .single();
+        // 3) Normalisasi tanggal
+        const toIso = (v) => {
+            if (!v) return null;
+            if (v instanceof Date) return v.toISOString();
+            if (typeof v === 'string') {
+                // Try to parse string to date
+                const parsed = new Date(v);
+                return isNaN(parsed.getTime()) ? v : parsed.toISOString();
+            }
+            return null;
+        };
 
-      if (error) throw error;
+        // 4) Prepare payload dengan struktur yang konsisten
+        const payload = {
+            petugas: data.petugas?.trim() || null,
+            petugas_jabatan: data.petugasJabatan?.trim() || "Petugas Pelayanan",
+            wilayah: data.wilayah?.trim() || null,
+            korban: data.korban?.trim() || null,
+            rumah_sakit: data.rumahSakit?.trim() || null,
+            lokasi_kecelakaan: data.lokasiKecelakaan?.trim() || null,
+            tanggal_kecelakaan: toIso(data.tanggalKecelakaan),
+            tgl_masuk_rs: toIso(data.tglMasukRS),
+            tgl_jam_notifikasi: toIso(data.tglJamNotifikasi),
+            tgl_jam_kunjungan: toIso(data.tglJamKunjungan),
+            uraian: data.uraianKunjungan?.trim() || null,
+            rekomendasi: data.rekomendasi?.trim() || null,
+            petugas_ttd: ttdUrl || null,
+            foto_survey: uploadedFotos.length > 0 ? uploadedFotos : null,
+            created_at: new Date().toISOString()
+        };
 
-      console.log("✅ Tersimpan ke Supabase:", inserted);
-      return inserted.id;
+        console.log("📦 Payload untuk Supabase:", payload);
+
+        // 5) Insert ke database
+        const { data: inserted, error } = await supabase
+            .from("form_kunjungan_rs")
+            .insert([payload])
+            .select()
+            .single();
+
+        if (error) {
+            console.error("❌ Database error:", error);
+            throw error;
+        }
+
+        console.log("✅ Data saved successfully to Supabase:", inserted);
+        
+        // Show success summary
+        if (uploadedFotos.length > 0) {
+            console.log(`📊 Summary: ${uploadedFotos.length} photos uploaded successfully`);
+        }
+        
+        return inserted.id;
+
     } catch (err) {
-      console.error("❌ Gagal simpan Supabase:", err?.message || err);
-      toast.error(`Gagal menyimpan data ke Supabase: ${err?.message || ""}`);
-      return null;
+        console.error("❌ Gagal simpan ke Supabase:", err);
+        
+        // More user-friendly error message
+        let errorMessage = "Gagal menyimpan data";
+        if (err.message?.includes("network")) {
+            errorMessage += " - masalah koneksi jaringan";
+        } else if (err.message?.includes("storage")) {
+            errorMessage += " - masalah penyimpanan foto";
+        } else if (err.message?.includes("JWT")) {
+            errorMessage += " - masalah autentikasi";
+        } else {
+            errorMessage += `: ${err.message || err}`;
+        }
+        
+        toast.error(errorMessage);
+        return null;
     }
   }
 
@@ -222,115 +439,106 @@ export default function Step4({ data, setData, back, next }) {
 
       // === HTML TEMPLATE ===
       const srcdoc = `
-    <!DOCTYPE html>
-    <html lang="id">
-    <head>
-    <meta charset="UTF-8">
-    <title>LaporanKunjungan_${vv.korban || "Anon"}</title>
-    <style>
-      body {
-        font-family: "Times New Roman", serif;
-        background: #111;
-        color: white;
-        padding: 30px;
-        line-height: 1.5;
-      }
-      .judul {
-        text-align: center;
-        font-weight: bold;
-        text-transform: uppercase;
-        margin-bottom: 20px;
-      }
-      table {
-        width: 100%;
-        font-size: 14px;
-      }
-      td { padding: 4px 8px; vertical-align: top; }
-      .label { width: 220px; color: rgba(0, 0, 0, 1); }
-      .box {
-        border: 1px solid #000000ff;
-        padding: 8px;
-        min-height: 100px;
-        margin-top: 6px;
-      }
-      .foto-container {
-        display: flex;
-        flex-wrap: wrap;
-        margin-top: 10px;
-      }
-      .ttd {
-        margin-top: 40px;
-        display: flex;
-        justify-content: space-between;
-        font-size: 14px;
-      }
-      .sign-img{ max-height:80px; max-width:260px; display:block; margin-top:8px; }
-    </style>
-    </head>
-    <body>
-      <div class="judul">
-        LEMBAR HASIL CETAK KUNJUNGAN KE RUMAH SAKIT <br/>
-        APLIKASI MOBILE PELAYANAN
-      </div>
-
-      <table>
-        <tr><td class="label">NPP / Nama Petugas</td><td>: ${
-          vv.petugas || "-"
-        }</td></tr>
-        <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${
-          vv.wilayah || "-"
-        }</td></tr>
-        <tr><td class="label">Nama Korban</td><td>: ${
-          vv.korban || "-"
-        }</td></tr>
-        <tr><td class="label">Lokasi Kecelakaan</td><td>: ${
-          vv.lokasiKecelakaan || "-"
-        }</td></tr>
-        <tr><td class="label">Kode RS / Nama RS</td><td>: ${
-          vv.rumahSakit || "-"
-        }</td></tr>
-        <tr><td class="label">Tanggal Kecelakaan</td><td>: ${
-          vv.tglKecelakaan || "-"
-        }</td></tr>
-        <tr><td class="label">Tanggal Masuk RS</td><td>: ${
-          vv.tglMasukRS || "-"
-        }</td></tr>
-        <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${
-          vv.tglJamNotifikasi || "-"
-        }</td></tr>
-        <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${
-          vv.tglJamKunjungan || "-"
-        }</td></tr>
-      </table>
-
-      <h4 style="color:#f55;margin-top:20px;">Uraian Hasil Kunjungan:</h4>
-      <div class="box">${vv.uraianKunjungan || "<i>Belum diisi.</i>"}</div>
-
-      <h4 style="color:#f55;margin-top:20px;">Rekomendasi / Kesimpulan:</h4>
-      <div class="box">${vv.rekomendasi || "<i>Belum diisi.</i>"}</div>
-
-      <p style="margin-top:10px;">
-        Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
-      </p>
-
-      <div class="ttd">
-        <div>
-          Mengetahui,<br/><br/><br/>
-          <b>Andi Raharja, S.A.B</b><br/>
-          <i>Kepala Bagian Operasional</i>
+      <!DOCTYPE html>
+      <html lang="id">
+      <head>
+      <meta charset="UTF-8">
+      <title>LaporanKunjungan_${vv.korban || "Anon"}</title>
+      <style>
+        body {
+          font-family: "Times New Roman", serif;
+          background: white;
+          color: black;
+          padding: 30px;
+          line-height: 1.5;
+        }
+        .judul {
+          text-align: center;
+          font-weight: bold;
+          text-transform: uppercase;
+          margin-bottom: 20px;
+        }
+        table {
+          width: 100%;
+          font-size: 14px;
+        }
+        td { padding: 4px 8px; vertical-align: top; }
+        .label { width: 220px; color: black; }
+        .box {
+          border: 1px solid #000;
+          padding: 8px;
+          min-height: 100px;
+          margin-top: 6px;
+        }
+        .foto-container {
+          display: flex;
+          flex-wrap: wrap;
+          margin-top: 10px;
+        }
+        .ttd {
+          margin-top: 40px;
+          display: flex;
+          justify-content: space-between;
+          font-size: 14px;
+        }
+        .sign-img {
+          max-height: 80px;
+          max-width: 260px;
+          display: block;
+          margin-top: 8px;
+        }
+        h4 {
+          color: black;
+          margin-top: 20px;
+        }
+      </style>
+      </head>
+      <body>
+        <div class="judul">
+          LEMBAR HASIL CETAK KUNJUNGAN KE RUMAH SAKIT <br/>
+          APLIKASI MOBILE PELAYANAN
         </div>
-        <div>
-          Petugas yang melakukan kunjungan,<br/>
-          ${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : "<br/><br/><br/>"}
-          <b>${vv.petugas || "................................"}</b><br/>
-          <i>${vv.petugasJabatan || ""}</i>
-        </div>
-      </div>
 
-      <div class="foto-container">${fotosHTML}</div>
-    </body>
-    </html>
-    `;
+        <table>
+          <tr><td class="label">NPP / Nama Petugas</td><td>: ${vv.petugas || "-"}</td></tr>
+          <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${vv.wilayah || "-"}</td></tr>
+          <tr><td class="label">Nama Korban</td><td>: ${vv.korban || "-"}</td></tr>
+          <tr><td class="label">Lokasi Kecelakaan</td><td>: ${vv.lokasiKecelakaan || "-"}</td></tr>
+          <tr><td class="label">Kode RS / Nama RS</td><td>: ${vv.rumahSakit || "-"}</td></tr>
+          <tr><td class="label">Tanggal Kecelakaan</td><td>: ${vv.tglKecelakaan || "-"}</td></tr>
+          <tr><td class="label">Tanggal Masuk RS</td><td>: ${vv.tglMasukRS || "-"}</td></tr>
+          <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${vv.tglJamNotifikasi || "-"}</td></tr>
+          <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${vv.tglJamKunjungan || "-"}</td></tr>
+        </table>
+
+        <h4>Uraian Hasil Kunjungan:</h4>
+        <div class="box">${vv.uraianKunjungan || "<i>Belum diisi.</i>"}</div>
+
+        <h4>Rekomendasi / Kesimpulan:</h4>
+        <div class="box">${vv.rekomendasi || "<i>Belum diisi.</i>"}</div>
+
+        <p style="margin-top:10px;">
+          Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
+        </p>
+
+        <div class="ttd">
+          <div>
+            Mengetahui,<br/><br/><br/>
+            <b>Andi Raharja, S.A.B</b><br/>
+            <i>Kepala Bagian Operasional</i>
+          </div>
+          <div>
+            Petugas yang melakukan kunjungan,<br/>
+            ${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : "<br/><br/><br/>"}
+            <b>${vv.petugas || "................................"}</b><br/>
+            <i>${vv.petugasJabatan || ""}</i>
+          </div>
+        </div>
+
+        <div class="foto-container">${fotosHTML}</div>
+      </body>
+      </html>
+      `;
 
       // === Buat blob dari HTML ===
       const blob = new Blob([srcdoc], { type: "text/html" });
@@ -433,7 +641,7 @@ export default function Step4({ data, setData, back, next }) {
     if (!val.foto) result.foto = "❌ Belum unggah";
     else if (["clear", "baik", "jelas"].includes((data.fotoQuality || "").toLowerCase()))
       result.foto = "✅ Foto jelas";
-    else result.foto = " ✅ Foto terlihat (tidak ada info kualitas)";
+    else result.foto = " ✅ Foto terlihat ";
 
     // Nama Korban
     if (!val.korban) result.korban = "❌ Belum isi";
@@ -506,38 +714,302 @@ export default function Step4({ data, setData, back, next }) {
     return images;
   }
 
-  async function uploadSumberFotosWithSingle(supabase, surveyId, sumbers = [], bucketFolderPrefix = "form_survei_aw") {
-    const out = [];
-
-    for (let i = 0; i < sumbers.length; i++) {
-      const row = sumbers[i] || {};
-      // Prioritaskan File[] dari input; kalau kosong, pakai dataURL yang sudah kamu simpan di r.foto
-      const items =
-        Array.isArray(row._files) && row._files.length
-          ? row._files
-          : (Array.isArray(row.foto) ? row.foto : []);
-
-      const urls = [];
-      for (let j = 0; j < items.length; j++) {
-        const url = await uploadFotoToStorage(
-          supabase,
-          items[j],
-          `${bucketFolderPrefix}/${surveyId}/sumbers/${i}` // folder rapi per survei/baris
-        );
-        if (url) urls.push(url);
-      }
-
-      out.push({
-        identitas: row.identitas || "",
-        foto_urls: urls,
-        foto_count: urls.length,
-      });
+  async function uploadSumberInformasi(files) {
+    if (!files || !Array.isArray(files) || files.length === 0) {
+        console.log("❌ No files to upload for sumber informasi");
+        return [];
     }
 
-    return out;
+    console.log(`📤 Starting upload of ${files.length} files to folder: SUMBER-INFORMASI`);
+
+    const uploadPromises = files.map(async (fileItem, index) => {
+        try {
+            console.log(`🔄 Processing sumber info file ${index + 1}:`, {
+                name: fileItem.name,
+                hasFile: !!fileItem.file,
+                hasDataURL: !!fileItem.dataURL,
+                sumberIndex: fileItem.sumberIndex,
+                fotoIndex: fileItem.fotoIndex
+            });
+            
+            let fileToUpload;
+            let fileName;
+            let label = fileItem.label || "Sumber Informasi";
+            let sumberIndex = fileItem.sumberIndex;
+            let fotoIndex = fileItem.fotoIndex;
+
+            // ✅ HANDLE BERBAGAI FORMAT FILE SUMBER INFORMASI
+            if (fileItem.file && fileItem.file instanceof File) {
+                fileToUpload = fileItem.file;
+                fileName = fileItem.name || fileItem.file.name;
+                console.log(`📄 File object: ${fileName}`);
+            } 
+            else if (fileItem.dataURL && (fileItem.dataURL.startsWith('data:') || fileItem.dataURL.startsWith('blob:'))) {
+                // Handle dataURL/blob URL (foto dari canvas/signature)
+                console.log(`🌐 Converting dataURL to file: ${fileItem.dataURL.substring(0, 50)}...`);
+                try {
+                    const response = await fetch(fileItem.dataURL);
+                    const blob = await response.blob();
+                    fileToUpload = new File([blob], fileItem.name || `sumber_info_${Date.now()}.png`, { 
+                        type: blob.type || 'image/png'
+                    });
+                    fileName = fileItem.name || `sumber_info_${Date.now()}.png`;
+                    console.log(`✅ Converted dataURL to file: ${fileName}`);
+                } catch (convertError) {
+                    console.error(`❌ Failed to convert dataURL:`, convertError);
+                    return null;
+                }
+            }
+            else if (fileItem instanceof File) {
+                fileToUpload = fileItem;
+                fileName = fileItem.name;
+                console.log(`📄 Direct File object: ${fileName}`);
+            }
+            else {
+                console.log("❌ Skip item - not a valid file for sumber info:", fileItem);
+                return null;
+            }
+
+            // Pastikan fileToUpload ada
+            if (!fileToUpload) {
+                console.log("❌ No file to upload after processing");
+                return null;
+            }
+
+            // Generate unique filename
+            const timestamp = Date.now();
+            const randomStr = Math.random().toString(36).substring(2, 8);
+            const fileExt = fileName.split('.').pop() || 'png';
+            const uniqueFileName = `sumber_${sumberIndex || 0}_foto_${fotoIndex || 0}_${timestamp}_${randomStr}.${fileExt}`;
+            const filePath = `sumber-informasi/${uniqueFileName}`; // ✅ PASTIKAN FOLDER BENAR
+
+            console.log(`📤 Uploading sumber info ${index + 1}/${files.length}: ${label} - ${uniqueFileName}`);
+
+            // Upload ke Supabase - ✅ PASTIKAN BUCKET BENAR
+            const { data, error } = await supabase.storage
+                .from('foto-survey')
+                .upload(filePath, fileToUpload, {
+                    cacheControl: '3600',
+                    upsert: false
+                });
+
+            if (error) {
+                console.error(`❌ Upload failed for ${fileName}:`, error);
+                console.error(`❌ Error details:`, error.message);
+                return null;
+            }
+
+            // Get public URL
+            const { data: urlData } = supabase.storage
+                .from('foto-survey')
+                .getPublicUrl(filePath);
+
+            console.log(`✅ SUMBER INFO Upload success: ${uniqueFileName}`, urlData.publicUrl);
+
+            return {
+                name: fileName,
+                fileName: uniqueFileName,
+                path: filePath,
+                url: urlData.publicUrl,
+                size: fileToUpload.size,
+                type: fileToUpload.type,
+                label: label,
+                category: "sumber_info", 
+                uploadedAt: new Date().toISOString(),
+                sumberIndex: sumberIndex,
+                fotoIndex: fotoIndex,
+                folder: 'sumber-informasi' // ✅ PASTIKAN FOLDER TERCATAT
+            };
+
+        } catch (error) {
+            console.error(`❌ Error uploading sumber info file ${index}:`, error);
+            return null;
+        }
+    });
+
+    const results = await Promise.all(uploadPromises);
+    const successfulUploads = results.filter(Boolean);
+    
+    console.log(`✅ Successfully uploaded ${successfulUploads.length}/${files.length} files to SUMBER-INFORMASI`);
+    return successfulUploads;
+  }
+
+  async function uploadTTDPetugas(ttdFile, fileName) {
+    try {
+      // Generate unique filename
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const finalFileName = `${timestamp}_${randomStr}.png`;
+      const filePath = `ttd-petugas/${finalFileName}`;
+
+      // Upload ke bucket foto-survey
+      const { data, error } = await supabase.storage
+        .from('foto-survey')
+        .upload(filePath, ttdFile);
+
+      if (error) {
+        console.error('❌ Gagal upload TTD:', error);
+        return null;
+      }
+
+      // Dapatkan public URL
+      const { data: urlData } = supabase.storage
+        .from('foto-survey')
+        .getPublicUrl(filePath);
+
+      console.log('✅ TTD berhasil diupload:', urlData.publicUrl);
+      return urlData.publicUrl;
+
+    } catch (error) {
+      console.error('❌ Error upload TTD:', error);
+      return null;
+    }
+  }
+
+  async function uploadFotoSurvey(files, folder = 'survey-images') {
+    if (!files || !Array.isArray(files) || files.length === 0) {
+        console.log("❌ No files to upload for foto survey");
+        return [];
+    }
+
+    console.log(`📤 Starting upload of ${files.length} files to ${folder}...`);
+
+    const uploadPromises = files.map(async (fileItem, index) => {
+        try {
+            console.log(`🔄 Processing file ${index + 1}:`, fileItem);
+            
+            let fileToUpload;
+            let fileName;
+            let label = fileItem.label || "Foto Survey";
+            let type = fileItem.type || "foto";
+            let sumberIndex = fileItem.sumberIndex;
+            let fotoIndex = fileItem.fotoIndex;
+
+            // Handle berbagai format file
+            if (fileItem instanceof File) {
+                fileToUpload = fileItem;
+                fileName = fileItem.name;
+                console.log(`📄 File object: ${fileName}`);
+            } 
+            else if (fileItem.file && fileItem.file instanceof File) {
+                fileToUpload = fileItem.file;
+                fileName = fileItem.name || fileItem.file.name;
+                console.log(`📄 File in object: ${fileName}`);
+            } 
+            else if (fileItem.url && fileItem.url.startsWith('blob:')) {
+                // Handle blob URL - convert to File
+                console.log(`🌐 Converting blob URL to file: ${fileItem.url}`);
+                const response = await fetch(fileItem.url);
+                const blob = await response.blob();
+                fileToUpload = new File([blob], fileItem.name || `foto_${Date.now()}.png`, { 
+                    type: blob.type 
+                });
+                fileName = fileItem.name || `foto_${Date.now()}.png`;
+                console.log(`✅ Converted blob to file: ${fileName}`);
+            }
+            else if (fileItem.url && fileItem.url.startsWith('http')) {
+                console.log(`🔗 Skip - already uploaded URL: ${fileItem.url}`);
+                return fileItem; // Skip jika sudah ada URL
+            }
+            else {
+                console.log("❌ Skip item - not a valid file:", fileItem);
+                return null;
+            }
+
+            // Gunakan label/type dari fileItem jika ada
+            if (fileItem.label) label = fileItem.label;
+            if (fileItem.type) type = fileItem.type;
+
+            // Generate unique filename
+            const timestamp = Date.now();
+            const randomStr = Math.random().toString(36).substring(2, 8);
+            const uniqueFileName = `${timestamp}_${randomStr}_${fileName}`;
+            const filePath = `${folder}/${uniqueFileName}`;
+
+            console.log(`📤 Uploading ${index + 1}/${files.length}: ${label} - ${uniqueFileName}`);
+
+            // Upload ke Supabase
+            const { data, error } = await supabase.storage
+                .from('foto-survey')
+                .upload(filePath, fileToUpload, {
+                    cacheControl: '3600',
+                    upsert: false
+                });
+
+            if (error) {
+                console.error(`❌ Upload failed for ${fileName}:`, error);
+                return null;
+            }
+
+            // Get public URL
+            const { data: urlData } = supabase.storage
+                .from('foto-survey')
+                .getPublicUrl(filePath);
+
+            console.log(`✅ Upload success: ${uniqueFileName}`, urlData.publicUrl);
+
+            return {
+                name: fileName,
+                fileName: uniqueFileName,
+                path: filePath,
+                url: urlData.publicUrl,
+                size: fileToUpload.size,
+                type: fileToUpload.type,
+                label: label,
+                category: type, 
+                uploadedAt: new Date().toISOString(),
+                sumberIndex: sumberIndex,
+                fotoIndex: fotoIndex,
+                folder: folder
+            };
+
+        } catch (error) {
+            console.error(`❌ Error uploading file ${index}:`, error);
+            return null;
+        }
+    });
+
+    const results = await Promise.all(uploadPromises);
+    const successfulUploads = results.filter(Boolean);
+    
+    console.log(`✅ Successfully uploaded ${successfulUploads.length}/${files.length} files`);
+    return successfulUploads;
+  }
+
+  console.log("🔍 === STEP4 DATA DEBUG ===");
+  console.log("📦 Data lengkap sebelum save:", data);
+  console.log("📸 attachSurvey:", data.attachSurvey);
+  console.log("📸 attachSurvey.fotoSurvey:", data.attachSurvey?.fotoSurvey);
+  console.log("📸 fotoSurveyList:", data.fotoSurveyList);
+  console.log("📸 Jumlah foto:", data.attachSurvey?.fotoSurvey?.length || 0);
+
+  if (data.attachSurvey?.fotoSurvey) {
+    console.log("📸 Detail setiap foto:");
+    data.attachSurvey.fotoSurvey.forEach((foto, index) => {
+        console.log(`   [${index}]`, {
+            name: foto.name,
+            hasFile: !!foto.file,
+            hasUrl: !!foto.url,
+            urlType: foto.url?.substring(0, 30),
+            keys: Object.keys(foto)
+        });
+    });
+  } else {
+      console.log("❌ Tidak ada fotoSurvey di data");
+  }
+
+  // Cek juga di localStorage
+  const savedData = localStorage.getItem("hasilSurveyData");
+  if (savedData) {
+      const parsed = JSON.parse(savedData);
+      console.log("💾 Data di localStorage - fotoSurvey:", parsed.fotoSurvey);
   }
 
   async function saveSurveyToSupabase(raw) {
+    console.log("🔍 RAW DATA sebelum save:", raw);
+    console.log("🔍 petugasTtd value:", raw.petugasTtd);
+    console.log("🔍 Type of petugasTtd:", typeof raw.petugasTtd);
+    console.log("🔍 attachSurvey.petugasTtd:", raw.attachSurvey?.petugasTtd);
     const toISODate = (d) => {
       if (!d) return null;
       if (/^\d{4}-\d{2}-\d{2}$/.test(String(d))) return String(d);
@@ -549,6 +1021,248 @@ export default function Step4({ data, setData, back, next }) {
     const jenisSurvei = typeof raw.jenisSurvei === 'string'
       ? raw.jenisSurvei.replace('keabsahan_waris','keabsahan_ahli_waris')
       : null;
+
+    let petugasTtdUrl = null;
+    if (raw.attachSurvey?.petugasTtd) {
+      const ttdData = raw.attachSurvey.petugasTtd;
+      console.log("📁 TTD dari attachSurvey:", ttdData);
+      
+      if (ttdData.file && ttdData.file instanceof File) {
+        console.log("📤 Upload TTD file...");
+        petugasTtdUrl = await uploadTTDPetugas(ttdData.file, 'ttd-petugas');
+      } else if (ttdData.url && typeof ttdData.url === 'string') {
+        console.log("🔗 TTD sudah ada URL:", ttdData.url);
+        petugasTtdUrl = ttdData.url;
+      }
+    }
+    // Fallback: cek di root (untuk kompatibilitas)
+    else if (raw.petugasTtd && raw.petugasTtd instanceof File) {
+      console.log("📤 Upload TTD dari root...");
+      petugasTtdUrl = await uploadTTDPetugas(raw.petugasTtd, 'ttd-petugas');
+    } else if (typeof raw.petugasTtd === 'string' && raw.petugasTtd.trim()) {
+      console.log("🔗 TTD URL dari root:", raw.petugasTtd);
+      petugasTtdUrl = raw.petugasTtd;
+    }
+
+    console.log("✅ Final petugasTtdUrl:", petugasTtdUrl);
+
+    const allFotoFiles = [];
+    const allSumberInfoFiles = [];
+
+    console.log("🔍 === FOTO SURVEY DEBUG ===");
+    console.log("📤 raw.attachSurvey?.fotoSurvey:", raw.attachSurvey?.fotoSurvey);
+    console.log("📤 raw.fotoSurveyList:", raw.fotoSurveyList);
+    console.log("📤 Final allFotoFiles:", allFotoFiles);
+    console.log("📤 Array.isArray:", Array.isArray(allFotoFiles));
+    console.log("📤 Length:", allFotoFiles.length);
+
+    console.log("🔍 === SUMBER INFO DEBUG ===");
+    console.log("📤 raw.sumbers:", raw.sumbers);
+    console.log("📤 Array.isArray raw.sumbers:", Array.isArray(raw.sumbers));
+
+    console.log("🔍 === DETAILED SUMBER INFO DEBUG ===");
+
+    if (Array.isArray(raw.sumbers)) {
+        console.log("✅ raw.sumbers is array with length:", raw.sumbers.length);
+        
+        let totalSumberWithFoto = 0;
+        let totalFotoFiles = 0;
+        
+        raw.sumbers.forEach((sumber, index) => {
+            console.log(`--- Sumber ${index} ---`);
+            console.log(`   Identitas: "${sumber.identitas}"`);
+            console.log(`   Foto exists: ${!!sumber.foto}`);
+            console.log(`   Foto is array: ${Array.isArray(sumber.foto)}`);
+            
+            if (sumber.foto && Array.isArray(sumber.foto)) {
+                console.log(`   Jumlah foto: ${sumber.foto.length}`);
+                totalSumberWithFoto++;
+                totalFotoFiles += sumber.foto.length;
+                
+                sumber.foto.forEach((foto, fotoIndex) => {
+                    console.log(`   > Foto ${fotoIndex}:`, {
+                        hasFile: !!foto.file,
+                        fileType: foto.file?.constructor?.name,
+                        hasDataURL: !!foto.dataURL,
+                        dataURLType: foto.dataURL?.substring(0, 50),
+                        hasURL: !!foto.url,
+                        name: foto.name,
+                        keys: Object.keys(foto)
+                    });
+                    
+                    // Cek apakah file valid
+                    if (foto.file && foto.file instanceof File) {
+                        console.log(`   ✅ Valid File object: ${foto.file.name} (${foto.file.size} bytes)`);
+                    } else if (foto.dataURL && foto.dataURL.startsWith('data:')) {
+                        console.log(`   ✅ Valid DataURL: ${foto.dataURL.substring(0, 100)}...`);
+                    } else if (foto.dataURL && foto.dataURL.startsWith('blob:')) {
+                        console.log(`   ✅ Valid Blob URL: ${foto.dataURL}`);
+                    } else {
+                        console.log(`   ❌ Invalid foto source`);
+                    }
+                });
+            } else {
+                console.log(`   ❌ Tidak ada foto array atau foto bukan array`);
+            }
+        });
+        
+        console.log(`📊 SUMMARY: ${totalSumberWithFoto} sumbers with foto, ${totalFotoFiles} total foto files`);
+    } else {
+        console.log("❌ raw.sumbers bukan array:", typeof raw.sumbers, raw.sumbers);
+    }
+
+    // 1. Foto Survey
+    if (raw.attachSurvey?.fotoSurvey && Array.isArray(raw.attachSurvey.fotoSurvey)) {
+        console.log("📸 Menambahkan foto survey:", raw.attachSurvey.fotoSurvey.length);
+        allFotoFiles.push(...raw.attachSurvey.fotoSurvey);
+    }
+    
+    // 2. Maps/SS Peta
+    if (raw.attachSurvey?.mapSS) {
+        console.log("🗺️ Menambahkan maps/SS peta");
+        allFotoFiles.push({
+            ...raw.attachSurvey.mapSS,
+            label: "Peta Lokasi", // Tambahkan label untuk identifikasi
+            type: "map"
+        });
+    }
+    
+    // 3. Barcode/QR
+    if (raw.attachSurvey?.barcode) {
+        console.log("📱 Menambahkan barcode/QR");
+        allFotoFiles.push({
+            ...raw.attachSurvey.barcode,
+            label: "Barcode/QR", // Tambahkan label untuk identifikasi  
+            type: "barcode"
+        });
+    }
+
+    // 4. Foto Sumber Informasi
+    if (Array.isArray(raw.sumbers)) {
+        console.log("👥 Processing sumbers for foto sumber informasi:", raw.sumbers.length);
+        
+        raw.sumbers.forEach((sumber, index) => {
+            if (sumber.foto && Array.isArray(sumber.foto)) {
+                console.log(`📸 Sumber ${index + 1} memiliki ${sumber.foto.length} foto`);
+                
+                sumber.foto.forEach((foto, fotoIndex) => {
+                    console.log(`   > Foto ${fotoIndex}:`, {
+                        hasFile: !!foto.file,
+                        hasDataURL: !!foto.dataURL,
+                        hasUrl: !!foto.url,
+                        name: foto.name,
+                        // Cek semua kemungkinan properti
+                        keys: Object.keys(foto)
+                    });
+                    
+                    // ✅ VALIDASI LEBIH LUAS - terima berbagai format
+                    const isValidFile = (
+                        (foto.file && foto.file instanceof File) ||
+                        (foto.dataURL && (foto.dataURL.startsWith('data:') || foto.dataURL.startsWith('blob:'))) ||
+                        (foto.url && (foto.url.startsWith('data:') || foto.url.startsWith('blob:'))) ||
+                        (typeof foto === 'string' && (foto.startsWith('data:') || foto.startsWith('blob:'))) // Support old format
+                    );
+                    
+                    if (isValidFile) {
+                        // Normalisasi ke format yang konsisten
+                        const normalizedFoto = {
+                            ...(typeof foto === 'string' ? { dataURL: foto } : foto), // Handle old string format
+                            label: `Sumber ${index + 1} - ${sumber.identitas || 'Unknown'}`,
+                            type: "sumber_info",
+                            sumberIndex: index,
+                            fotoIndex: fotoIndex
+                        };
+                        
+                        console.log(`   ✅ Adding to upload queue:`, {
+                            name: normalizedFoto.name,
+                            label: normalizedFoto.label,
+                            sumberIndex: normalizedFoto.sumberIndex
+                        });
+                        
+                        allSumberInfoFiles.push(normalizedFoto);
+                    } else {
+                        console.log(`   ❌ Skip foto - no valid source for sumber info`);
+                        console.log(`   ❌ File details:`, foto);
+                    }
+                });
+            } else {
+                console.log(`   ℹ️ Sumber ${index + 1} tidak memiliki foto atau foto bukan array`);
+            }
+        });
+        
+        console.log(`📦 Total allSumberInfoFiles collected: ${allSumberInfoFiles.length}`);
+    } else {
+        console.log("❌ raw.sumbers bukan array atau tidak ada:", raw.sumbers);
+    }
+
+    console.log("📦 Total foto survey yang akan diupload:", allFotoFiles.length);
+    console.log("📦 Total foto sumber informasi yang akan diupload:", allSumberInfoFiles.length);
+    console.log("📦 Detail foto survey:", allFotoFiles);
+    console.log("📦 Detail foto sumber info:", allSumberInfoFiles);
+
+    console.log("📂 Processing dokumen KTP, KK, dll...");
+  
+    const dokumenResults = await uploadSemuaDokumen(raw.attachSurvey || {}, raw.id);
+    
+    if (dokumenResults.success.length > 0) {
+      console.log("✅ Dokumen berhasil diupload:", dokumenResults.success.map(d => d.jenis));
+    }
+    if (dokumenResults.failed.length > 0) {
+      console.log("❌ Dokumen gagal diupload:", dokumenResults.failed.map(d => d.jenis));
+    }
+
+    let uploadedAllFotos = [];
+    let uploadedSumberInfoFotos = [];
+    
+    if (allFotoFiles.length > 0) {
+        console.log("📤 Starting upload ALL photos...");
+        uploadedAllFotos = await uploadFotoSurvey(allFotoFiles, 'survey-images');
+        console.log("✅ All photos upload completed. Results:", uploadedAllFotos);
+    } else {
+        console.log("❌ Tidak ada foto yang perlu diupload");
+    }
+
+    if (allSumberInfoFiles.length > 0) {
+      console.log("🔍 === PRE-UPLOAD SUMBER INFO DEBUG ===");
+      console.log("📁 Folder target: sumber-informasi");
+      console.log("📦 Files ready for upload:", allSumberInfoFiles.map((f, index) => ({
+          index,
+          name: f.name,
+          hasFile: !!f.file,
+          hasDataURL: !!f.dataURL,
+          fileType: f.file?.constructor?.name,
+          dataURLType: f.dataURL?.substring(0, 50),
+          label: f.label,
+          sumberIndex: f.sumberIndex,
+          fotoIndex: f.fotoIndex
+      })));
+        console.log("📤 Starting upload SUMBER INFO photos to folder: sumber-informasi");
+        
+        uploadedSumberInfoFotos = await uploadSumberInformasi(allSumberInfoFiles);
+        console.log("✅ Sumber info photos upload completed. Results:", uploadedSumberInfoFotos);
+        
+        // Cek hasil upload
+        if (uploadedSumberInfoFotos.length === 0) {
+            console.log("❌ WARNING: No sumber info photos were uploaded successfully!");
+            console.log("❌ Mungkin ada masalah dengan:");
+            console.log("   - Format file tidak didukung");
+            console.log("   - File terlalu besar");
+            console.log("   - Koneksi internet");
+            console.log("   - Permissions Supabase storage");
+        } else {
+            console.log(`🎉 Successfully uploaded ${uploadedSumberInfoFotos.length} sumber info photos to folder 'sumber-informasi'`);
+            uploadedSumberInfoFotos.forEach(foto => {
+                console.log(`   ✅ Uploaded: ${foto.fileName} -> ${foto.url}`);
+                console.log(`   📁 Folder: ${foto.folder}`);
+            });
+        }
+    } else {
+        console.log("❌ Tidak ada foto sumber informasi yang perlu diupload - allSumberInfoFiles is empty");
+        console.log("❌ Kemungkinan penyebab:");
+        console.log("   - raw.sumbers kosong");
+        console.log("   - sumbers tidak memiliki array foto");
+        console.log("   - objek foto tidak memiliki property file/dataURL");
+    }
 
     // siapkan sumbers mentah (identitas saja) untuk disimpan duluan
     const sumbersLite = Array.isArray(raw.sumbers)
@@ -573,6 +1287,8 @@ export default function Step4({ data, setData, back, next }) {
       sifat,
       uraian:               raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
       kesimpulan:           raw.kesimpulanSurvei ?? null,
+      petugas_ttd:          petugasTtdUrl,
+      foto_survey:          uploadedAllFotos,
 
       attachments: {
         ktp: !!raw.attachSurvey?.ktp,
@@ -584,11 +1300,8 @@ export default function Step4({ data, setData, back, next }) {
         akta_kelahiran: !!raw.attachSurvey?.aktaKelahiran,
         map_ss: !!raw.attachSurvey?.mapSS,
         barcode_qr: !!raw.attachSurvey?.barcode,
-        foto_survey_count: Array.isArray(raw.fotoSurveyList)
-          ? raw.fotoSurveyList.length
-          : Array.isArray(raw.attachSurvey?.fotoSurvey)
-          ? raw.attachSurvey.fotoSurvey.length
-          : 0,
+        foto_survey_count: uploadedAllFotos.length,
+        sumber_info_count: uploadedSumberInfoFotos.length,
       },
 
       // kolom baru:
@@ -609,30 +1322,47 @@ export default function Step4({ data, setData, back, next }) {
 
       // 2) Upload foto-foto sumber berdasarkan ID
       const surveyId = inserted.id;
-      const uploaded = await uploadSumberFotosWithSingle({
-        surveyKey: surveyId,
-        sumbers: Array.isArray(raw.sumbers) ? raw.sumbers : [],
-        bucket: 'survei-aw', // pastikan sudah ada bucket ini di Supabase Storage
+      
+      const sumbersWithUploadedFotos = (raw.sumbers || []).map((sumber, index) => {
+        const uploadedFotosForSumber = uploadedSumberInfoFotos.filter(foto => 
+          foto.sumberIndex === index
+        );
+        
+        return {
+          identitas: sumber.identitas || '',
+          foto: uploadedFotosForSumber.map(foto => ({
+            name: foto.name,
+            fileName: foto.fileName,
+            url: foto.url,
+            uploadedAt: foto.uploadedAt
+          })),
+          foto_count: uploadedFotosForSumber.length
+        };
       });
 
       // 3) UPDATE baris dengan sumbers_paths + (opsional) lengkapi sumbers
-      const sumbersCompleted = (inserted.sumbers || []).map((r, i) => ({
-        ...r,
-        foto_count: uploaded[i]?.foto_count || 0,
-      }));
-
       const { error: updErr } = await supabase
         .from('form_survei_aw')
         .update({
-          sumbers: sumbersCompleted,       // masih menyimpan identitas + foto_count
-          sumbers_paths: uploaded,         // berisi foto_paths & foto_urls
+          sumbers: sumbersWithUploadedFotos,      
+          sumbers_paths: uploadedSumberInfoFotos,      
         })
         .eq('id', surveyId);
 
       if (updErr) throw updErr;
 
-      console.log('✅ Survei tersimpan + sumber terunggah:', surveyId);
-      return surveyId;
+      console.log('✅ Survei tersimpan + semua foto terunggah:', {
+        surveyId,
+        fotoSurvey: uploadedAllFotos.length,
+        fotoSumberInfo: uploadedSumberInfoFotos.length
+      });
+      
+      return {
+        id: surveyId,
+        fotoSurvey: uploadedAllFotos,
+        fotoSumberInfo: uploadedSumberInfoFotos
+      };
+
     } catch (err) {
       const msg = [
         err?.message,

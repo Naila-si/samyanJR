@@ -660,7 +660,7 @@ export default function Step5({ data = {}, setData, back, setStep }) {
           💾 Simpan Laporan
         </button>
 
-        <button
+        {/* <button
           className="kw-btn kw-btn-red"
           type="button"
           onClick={() => {
@@ -669,7 +669,7 @@ export default function Step5({ data = {}, setData, back, setStep }) {
           }}
         >
           🗑️ Kosongkan LocalStorage
-        </button>
+        </button> */}
       </div>
 
       {/* Confetti emoji saat submit */}
