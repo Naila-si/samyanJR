@@ -408,13 +408,20 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       (v.hariTanggal || "").toString().length > 0 &&
       v.namaKorban.trim() &&
       v.tempatKecelakaan.trim();
-    const lampiranMinimal = !!att.mapSS?.url && !!att.barcode?.url && (att.fotoSurvey || []).length > 0;
-    if (sifatCidera === "MD") {
-      const needed = ["ktp","bukuTabungan","formPengajuan","formKeteranganAW","skKematian","kk","aktaKelahiran"];
-      const ok = needed.every((k) => !!att[k]) && lampiranMinimal;
-      return base && ok;
+
+    // yang bener-bener minimal WAJIB
+    const lampiranMinimal =
+      !!att.mapSS?.url &&
+      !!att.barcode?.url &&
+      (att.fotoSurvey || []).length > 0 &&
+      !!att.petugasTtd?.url;
+
+    // MD & LL sama-sama cuma butuh lampiran minimal
+    if (sifatCidera === "MD" || sifatCidera === "LL") {
+      return base && lampiranMinimal;
     }
-    if (sifatCidera === "LL") return base && lampiranMinimal;
+
+    // kalau suatu saat ada jenis lain
     return base;
   }, [v, att, sifatCidera, sumbers]);
 
@@ -792,7 +799,14 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       {/* LAMPIRAN */}
       <section className="card">
         <div className="label">Lampiran</div>
-
+        <p className="lampiran-hint">
+          Untuk mendukung hasil survei, <strong>disarankan</strong> mengunggah dokumen seperti
+          <strong> KTP</strong>, <strong>KK</strong>, <strong>Akta Kelahiran</strong>,
+          <strong> Buku Tabungan</strong>, dan formulir terkait jika sudah tersedia.
+          Kalau belum lengkap, survei tetap bisa dilanjutkan selama
+          <strong> Foto Survei</strong>, <strong> SS Peta/Map</strong>, <strong> Barcode/QR</strong>,
+          dan <strong> TTD Petugas</strong> sudah diunggah.
+        </p>
         {sifatCidera === "MD" && (
           <div className="grid-attach">
             {/* KTP */}
@@ -1558,5 +1572,14 @@ const css = `
   .grid-attach{
     grid-template-columns: 1fr;
   }
+}
+.lampiran-hint{
+  margin-top: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.lampiran-hint strong{
+  font-weight: 800;
 }
 `;

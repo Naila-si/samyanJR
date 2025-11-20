@@ -1409,7 +1409,10 @@ export default function Step4({ data, setData, back, next }) {
     const isFilled = (v) => !!(v && String(v).trim() !== "");
 
     // --- VALIDASI FILE WAJIB ---
-    const wajibFiles = [
+    // fotoSurvey: selalu dicek (wajib)
+    // dokumen lain (ktp/kk/dll): hanya dicek kalau user memang upload (opsional)
+    const baseWajibFiles = ["fotoSurvey"]; // selalu ada
+    const optionalFiles = [
       "ktp",
       "kk",
       "bukuTabungan",
@@ -1417,7 +1420,12 @@ export default function Step4({ data, setData, back, next }) {
       "formKeteranganAW",
       "skKematian",
       "aktaKelahiran",
-      "fotoSurvey",
+    ];
+
+    // hanya masukkan dokumen opsional yang BENAR-BENAR ada di attachSurvey
+    const dokumenYangDicek = [
+      ...baseWajibFiles,
+      ...optionalFiles.filter((key) => !!att[key]), // cuma yang diisi user
     ];
 
     const labelMap = {
@@ -1435,7 +1443,7 @@ export default function Step4({ data, setData, back, next }) {
       uraian: "Uraian & Kesimpulan",
     };
 
-    wajibFiles.forEach((key) => {
+    dokumenYangDicek.forEach((key) => {
       if (key === "fotoSurvey") {
         const list =
           Array.isArray(att.fotoSurvey) && att.fotoSurvey.length > 0
@@ -1443,8 +1451,10 @@ export default function Step4({ data, setData, back, next }) {
             : Array.isArray(data.fotoSurveyList)
             ? data.fotoSurveyList
             : [];
+
         result[key] = list.length > 0 ? "✅ File sudah terunggah" : "❌ Belum unggah";
       } else {
+        // di sini aman, karena cuma key yang benar-benar ada di att yang dicek
         result[key] = att[key] ? "✅ File sudah terunggah" : "❌ Belum unggah";
       }
     });
