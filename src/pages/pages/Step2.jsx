@@ -2,8 +2,8 @@ import React, { useMemo, useState } from "react";
 
 const templates = [
   "",
-  "Lembar Hasil Kunjungan RS (Mobile Pelayanan)",
-  "Laporan Hasil Survei – Ahli Waris (Versi Terbaru)",
+  "Lembar Hasil Kunjungan RS",
+  "Laporan Hasil Survei",
 ];
 const SURVEY_TEMPLATE = templates[2];
 

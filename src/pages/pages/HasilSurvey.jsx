@@ -512,7 +512,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     <div className="sv-wrap container">
       <div className="head">
         <div>
-          <h2 className="title">Laporan Hasil Survei (Ahli Waris)</h2>
+          <h2 className="title">Laporan Hasil Survei</h2>
           <div className="chips">
             <span className="chip">Langkah 3/5</span>
             <span className="chip alt">Sifat Cidera: {sifatCidera || "—"}</span>
