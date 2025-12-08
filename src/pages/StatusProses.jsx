@@ -600,6 +600,42 @@ async function loadFilesWithMetadata() {
   return allFiles;
 }
 
+// ============================
+// CACHE untuk metadata storage
+// ============================
+let _filesMetaCache = {
+  at: 0,
+  data: null,
+  promise: null,
+};
+
+async function loadFilesWithMetadataCached(maxAgeMs = 5 * 60 * 1000) {
+  const now = Date.now();
+
+  // kalau masih fresh, pakai cache
+  if (_filesMetaCache.data && now - _filesMetaCache.at < maxAgeMs) {
+    return _filesMetaCache.data;
+  }
+
+  // kalau ada request yang lagi jalan, tunggu itu aja
+  if (_filesMetaCache.promise) {
+    return _filesMetaCache.promise;
+  }
+
+  _filesMetaCache.promise = (async () => {
+    const data = await loadFilesWithMetadata();
+    _filesMetaCache = { at: Date.now(), data, promise: null };
+    return data;
+  })();
+
+  return _filesMetaCache.promise;
+}
+
+// optional kalau mau force refresh manual nanti
+function invalidateFilesMetaCache() {
+  _filesMetaCache = { at: 0, data: null, promise: null };
+}
+
 async function prepareForOutput(rec, variant = detectVariant(rec)) {
   const vv = {
     allPhotos: [],
@@ -649,7 +685,7 @@ async function prepareForOutput(rec, variant = detectVariant(rec)) {
     });
   };
 
-  const allFilesWithMetadata = await loadFilesWithMetadata();
+  const allFilesWithMetadata = await loadFilesWithMetadataCached();
 
   const recordTimeMs = pickValidTime(rec.createdAt, rec.waktu, rec.created_at);
   const identityTokens = normalizeIdentityTokens(rec);
@@ -2157,10 +2193,6 @@ export default function StatusProses() {
   const [generatingPreviews, setGeneratingPreviews] = useState({});
   const navigate = useNavigate();
 
-  useEffect(() => {
-    console.log("[StatusProses] mounted");
-  }, []);
-
   const [ttdUrl, setTtdUrl] = useState("");
   useEffect(() => {
     setTtdUrl(new URL("andi-ttd.jpeg", window.location.origin).href);
@@ -2363,13 +2395,9 @@ export default function StatusProses() {
      ------------------------------ */
   const filtered = useMemo(() => {
     let rows = data.filter((r) => {
-      const name = String(r.name || "");
-      const docType = String(r.docType || "");
-      const qq = q.toLowerCase();
-
       const matchText =
-        name.toLowerCase().includes(qq) || docType.toLowerCase().includes(qq);
-
+        r.name.toLowerCase().includes(q.toLowerCase()) ||
+        r.docType.toLowerCase().includes(q.toLowerCase());
       const matchStatus = status === "Semua" ? true : r.status === status;
       return matchText && matchStatus;
     });
@@ -2465,20 +2493,6 @@ export default function StatusProses() {
         )}
       </>
     );
-  };
-
-  const fmtDateSafe = (ms) => {
-    const t = Number(ms);
-    if (!Number.isFinite(t)) return "-";
-    try {
-      return new Date(t).toLocaleDateString("id-ID", {
-        day: "2-digit",
-        month: "long",
-        year: "numeric",
-      });
-    } catch {
-      return "-";
-    }
   };
 
   const renderRejectedContent = (row) => {
@@ -2658,6 +2672,29 @@ export default function StatusProses() {
     )
   ) : null;
 
+  const withTimeout = (promise, ms = 10000, label = "Operasi") =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${label} timeout (${ms}ms)`)), ms)
+      ),
+    ]);
+
+  // key stabil per row (dipakai buat generatingPreviews)
+  const getRecordKey = (row) => {
+    const raw = row?._raw || row || {};
+    return (
+      raw.id ||
+      raw.local_id ||
+      raw.uuid ||
+      row?.id ||
+      row?.local_id ||
+      row?.uuid ||
+      row?.noPL ||
+      `${row?.name || "row"}__${row?.dateMs || ""}`
+    );
+  };
+
   /* ============================================================
      ✨ UNDUH LAPORAN ALA VERIFIKATOR DASHBOARD
      - Jika sudah ada stamped PDF => buka langsung
@@ -2665,22 +2702,18 @@ export default function StatusProses() {
      - Andi TTD muncul hanya saat status selesai (done)
      ============================================================ */
   const handleDownloadReport = async (record) => {
-    const recordId =
-      record._raw?.id ||
-      record._raw?.local_id ||
-      record._raw?.uuid ||
-      record?.id ||
-      `${Date.now()}`;
-
-    // ✅ buka tab baru LANGSUNG saat klik (biar gak diblokir)
-    const newTab = window.open("", "_blank", "noopener,noreferrer");
+    const recordKey = getRecordKey(record);
 
     try {
-      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: true }));
+      setGeneratingPreviews((prev) => ({ ...prev, [recordKey]: true }));
       showToast("Menyiapkan laporan...", "info");
 
       // 1) ambil detail SEBENARNYA dari tabel sesuai varian
-      const { variant, row } = await fetchDetailFromSupabase(record._raw);
+      const { variant, row } = await withTimeout(
+        fetchDetailFromSupabase(record._raw),
+        45000,
+        "Ambil detail"
+      );
       if (!row) throw new Error("Detail row tidak ditemukan");
 
       const normalizedData = normalizeDetailRow(variant, row);
@@ -2702,35 +2735,39 @@ export default function StatusProses() {
 
       if (isRealPdf) {
         showToast("Membuka laporan PDF...", "info");
-
-        // ✅ arahkan tab yg udah kebuka
-        if (newTab) newTab.location.href = stampedPdfUrl;
-        else window.open(stampedPdfUrl, "_blank", "noopener,noreferrer");
-
+        window.open(stampedPdfUrl, "_blank", "noopener,noreferrer");
         showToast("Laporan dibuka", "success");
-        setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+        setGeneratingPreviews((prev) => ({ ...prev, [recordKey]: false }));
         return;
       }
 
       // 3) kalau belum ada pdf, generate HTML preview sesuai record
-      const vv = await prepareForOutput(
-        {
-          ...normalizedData,
-          createdAt:
-            record._raw?.created_at ||
-            record._raw?.waktu ||
-            normalizedData.createdAt,
-          waktu: record._raw?.waktu || normalizedData.waktu,
-          id: record._raw?.id || record._raw?.local_id || normalizedData.id,
-          local_id: record._raw?.local_id || normalizedData.local_id,
-        },
-        variant
+      const vv = await withTimeout(
+        prepareForOutput(
+          {
+            ...normalizedData,
+            createdAt:
+              record._raw?.created_at ||
+              record._raw?.waktu ||
+              normalizedData.createdAt,
+            waktu: record._raw?.waktu || normalizedData.waktu,
+            id: record._raw?.id || record._raw?.local_id || normalizedData.id,
+            local_id: record._raw?.local_id || normalizedData.local_id,
+          },
+          variant
+        ),
+        45000,
+        "Siapkan lampiran"
       );
 
       vv.andiTtdUrl = ttdUrl || "/andi-ttd.jpeg";
 
+      // ✅ robust done detection (RS/MD/LL)
       const rawStatus = String(
-        normalizedData.status || record._raw?.status || record.status || ""
+        normalizedData.status ||
+          record._raw?.status ||
+          record.status || // label dari tabel list ("Selesai")
+          ""
       ).toLowerCase();
 
       const done =
@@ -2742,7 +2779,10 @@ export default function StatusProses() {
         record._raw?.finished_at ||
         record._raw?.verified_at;
 
+      // set flag buat AW & RS
       vv.__verStatus = done ? "disetujui" : null;
+
+      // optional tapi bagus: supaya RS builder kebaca juga
       vv.status = normalizedData.status || record._raw?.status || vv.status;
 
       let html = "";
@@ -2750,30 +2790,73 @@ export default function StatusProses() {
       else if (variant === "ll") html = buildPreviewHTML_LL(vv);
       else if (variant === "rs") html = buildPreviewHTML_RS(vv);
 
-      // 4) bikin Blob URL (lebih aman dari data URL panjang)
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
+      // 4) BUKA TAB BARU pakai blob url (anti ketuker)
+      printHtmlViaIframe(html);
 
-      // arahkan tab yg udah kebuka
-      if (newTab) newTab.location.href = url;
-      else window.open(url, "_blank", "noopener,noreferrer");
-
-      // optional: bersihin blob url biar ga numpuk di memory
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-
-      showToast("Laporan dibuka di tab baru", "success");
-      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+      showToast("Membuka jendela cetak...", "success");
+      setGeneratingPreviews((prev) => ({ ...prev, [recordKey]: false }));
     } catch (error) {
       console.error("Error generating report:", error);
       showToast("Gagal membuat laporan", "error");
-      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
-
-      // ✅ tutup tab kosong kalau gagal
-      try {
-        newTab?.close();
-      } catch {}
+      setGeneratingPreviews((prev) => ({ ...prev, [recordKey]: false }));
     }
   };
+
+  function printHtmlViaIframe(html) {
+    try {
+      const iframe = document.createElement("iframe");
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.style.opacity = "0";
+      iframe.setAttribute("aria-hidden", "true");
+
+      document.body.appendChild(iframe);
+
+      const doc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (!doc) throw new Error("iframe document not available");
+
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      const cleanup = () => {
+        try {
+          document.body.removeChild(iframe);
+        } catch {}
+      };
+
+      const doPrint = () => {
+        try {
+          iframe.contentWindow?.focus();
+          iframe.contentWindow?.print();
+        } catch (e) {
+          console.warn("print() blocked:", e);
+        }
+        // cleanup pasti jalan max 15 detik
+        setTimeout(cleanup, 45000);
+      };
+
+      // trigger cepat: max nunggu 800ms
+      const fastTimer = setTimeout(doPrint, 800);
+
+      iframe.onload = () => {
+        clearTimeout(fastTimer);
+        // kasih sedikit waktu render font/image
+        setTimeout(doPrint, 200);
+      };
+    } catch (e) {
+      console.error("printHtmlViaIframe error:", e);
+      // fallback tab baru
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" }); // ✅ Blob, bukan Bob
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+  }
 
   return (
     <div className="status-page">
@@ -2865,7 +2948,11 @@ export default function StatusProses() {
                       {r.docType}
                     </td>
                     <td data-label="Tanggal Pembaruan">
-                      {fmtDateSafe(r.dateMs)}
+                      {new Date(r.dateMs).toLocaleDateString("id-ID", {
+                        day: "2-digit",
+                        month: "long",
+                        year: "numeric",
+                      })}
                     </td>
                     <td data-label="Status Proses">
                       <Badge status={r.status} />
@@ -2893,17 +2980,20 @@ export default function StatusProses() {
                           Lihat Proses
                         </button>
                       ) : r.status === "Selesai" ? (
-                        <button
-                          className="link link-strong"
-                          onClick={() => handleDownloadReport(r)}
-                          disabled={
-                            generatingPreviews[r._raw?.id || r._raw?.local_id]
-                          }
-                        >
-                          {generatingPreviews[r._raw?.id || r._raw?.local_id]
-                            ? "Menyiapkan..."
-                            : "📄 Unduh Laporan"}
-                        </button>
+                        (() => {
+                          const k = getRecordKey(r); // ✅ key stabil
+                          const isGen = !!generatingPreviews[k];
+
+                          return (
+                            <button
+                              className="link link-strong"
+                              onClick={() => handleDownloadReport(r)}
+                              disabled={isGen} // ✅ disable hanya row ini
+                            >
+                              {isGen ? "Menyiapkan..." : "📄 Unduh Laporan"}
+                            </button>
+                          );
+                        })()
                       ) : r.status === "Ditolak" ? (
                         <button
                           className="link link-strong"
