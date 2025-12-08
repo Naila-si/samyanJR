@@ -2613,105 +2613,112 @@ export default function StatusProses() {
      - Andi TTD muncul hanya saat status selesai (done)
      ============================================================ */
   const handleDownloadReport = async (record) => {
-    const recordId =
-      record._raw?.id || record._raw?.local_id || record._raw?.uuid;
+  const recordId =
+    record._raw?.id || record._raw?.local_id || record._raw?.uuid;
 
-    try {
-      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: true }));
-      showToast("Menyiapkan laporan...", "info");
+  // ✅ buka tab baru LANGSUNG saat klik (biar gak diblokir)
+  const newTab = window.open("", "_blank", "noopener,noreferrer");
 
-      // 1) ambil detail SEBENARNYA dari tabel sesuai varian
-      const { variant, row } = await fetchDetailFromSupabase(record._raw);
-      if (!row) throw new Error("Detail row tidak ditemukan");
+  try {
+    setGeneratingPreviews((prev) => ({ ...prev, [recordId]: true }));
+    showToast("Menyiapkan laporan...", "info");
 
-      const normalizedData = normalizeDetailRow(variant, row);
+    // 1) ambil detail SEBENARNYA dari tabel sesuai varian
+    const { variant, row } = await fetchDetailFromSupabase(record._raw);
+    if (!row) throw new Error("Detail row tidak ditemukan");
 
-      // 2) cek stamped pdf terbaru di detail (bukan list)
-      const ver =
-        (normalizedData.counts && normalizedData.counts.verifikator) || {};
-      const stampedPdfUrl =
-        ver.stampedPdfUrl ||
-        normalizedData.files?.hasilFormPdf ||
-        normalizedData.files?.pdfUrl ||
-        null;
+    const normalizedData = normalizeDetailRow(variant, row);
 
-      const isRealPdf =
-        stampedPdfUrl &&
-        typeof stampedPdfUrl === "string" &&
-        stampedPdfUrl.trim() !== "" &&
-        !stampedPdfUrl.includes("/Lembar_Kunjungan_RS_NAI.pdf");
+    // 2) cek stamped pdf terbaru di detail (bukan list)
+    const ver =
+      (normalizedData.counts && normalizedData.counts.verifikator) || {};
+    const stampedPdfUrl =
+      ver.stampedPdfUrl ||
+      normalizedData.files?.hasilFormPdf ||
+      normalizedData.files?.pdfUrl ||
+      null;
 
-      if (isRealPdf) {
-        showToast("Membuka laporan PDF...", "info");
-        window.open(stampedPdfUrl, "_blank", "noopener,noreferrer");
-        showToast("Laporan dibuka", "success");
-        setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
-        return;
-      }
+    const isRealPdf =
+      stampedPdfUrl &&
+      typeof stampedPdfUrl === "string" &&
+      stampedPdfUrl.trim() !== "" &&
+      !stampedPdfUrl.includes("/Lembar_Kunjungan_RS_NAI.pdf");
 
-      // 3) kalau belum ada pdf, generate HTML preview sesuai record
-      const vv = await prepareForOutput(
-        {
-          ...normalizedData,
-          // suntik waktu & id dari list record (uploader)
-          createdAt:
-            record._raw?.created_at ||
-            record._raw?.waktu ||
-            normalizedData.createdAt,
-          waktu: record._raw?.waktu || normalizedData.waktu,
-          id: record._raw?.id || record._raw?.local_id || normalizedData.id,
-          local_id: record._raw?.local_id || normalizedData.local_id,
-        },
-        variant
-      );
+    if (isRealPdf) {
+      showToast("Membuka laporan PDF...", "info");
 
-      vv.andiTtdUrl = ttdUrl || "/andi-ttd.jpeg";
+      // ✅ arahkan tab yg udah kebuka
+      if (newTab) newTab.location.href = stampedPdfUrl;
+      else window.open(stampedPdfUrl, "_blank", "noopener,noreferrer");
 
-      // ✅ robust done detection (RS/MD/LL)
-      const rawStatus = String(
-        normalizedData.status ||
-          record._raw?.status ||
-          record.status || // label dari tabel list ("Selesai")
-          ""
-      ).toLowerCase();
-
-      const done =
-        rawStatus === "selesai" ||
-        rawStatus === "disetujui" ||
-        normalizedData.finishedAt ||
-        normalizedData.verifiedAt ||
-        normalizedData.verified ||
-        record._raw?.finished_at ||
-        record._raw?.verified_at;
-
-      // set flag buat AW & RS
-      vv.__verStatus = done ? "disetujui" : null;
-
-      // optional tapi bagus: supaya RS builder kebaca juga
-      vv.status = normalizedData.status || record._raw?.status || vv.status;
-
-      let html = "";
-      if (variant === "md") html = await buildPreviewHTML_MD(vv);
-      else if (variant === "ll") html = buildPreviewHTML_LL(vv);
-      else if (variant === "rs") html = buildPreviewHTML_RS(vv);
-
-      // 4) BUKA TAB BARU pakai blob url (anti ketuker)
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-
-      window.open(url, "_blank", "noopener,noreferrer");
-
-      // bersihin blob setelah aman
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
-
-      showToast("Laporan dibuka di tab baru", "success");
+      showToast("Laporan dibuka", "success");
       setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
-    } catch (error) {
-      console.error("Error generating report:", error);
-      showToast("Gagal membuat laporan", "error");
-      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+      return;
     }
-  };
+
+    // 3) kalau belum ada pdf, generate HTML preview sesuai record
+    const vv = await prepareForOutput(
+      {
+        ...normalizedData,
+        createdAt:
+          record._raw?.created_at ||
+          record._raw?.waktu ||
+          normalizedData.createdAt,
+        waktu: record._raw?.waktu || normalizedData.waktu,
+        id: record._raw?.id || record._raw?.local_id || normalizedData.id,
+        local_id: record._raw?.local_id || normalizedData.local_id,
+      },
+      variant
+    );
+
+    vv.andiTtdUrl = ttdUrl || "/andi-ttd.jpeg";
+
+    const rawStatus = String(
+      normalizedData.status ||
+        record._raw?.status ||
+        record.status ||
+        ""
+    ).toLowerCase();
+
+    const done =
+      rawStatus === "selesai" ||
+      rawStatus === "disetujui" ||
+      normalizedData.finishedAt ||
+      normalizedData.verifiedAt ||
+      normalizedData.verified ||
+      record._raw?.finished_at ||
+      record._raw?.verified_at;
+
+    vv.__verStatus = done ? "disetujui" : null;
+    vv.status = normalizedData.status || record._raw?.status || vv.status;
+
+    let html = "";
+    if (variant === "md") html = await buildPreviewHTML_MD(vv);
+    else if (variant === "ll") html = buildPreviewHTML_LL(vv);
+    else if (variant === "rs") html = buildPreviewHTML_RS(vv);
+
+    // 4) bikin blob url
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    // ✅ arahkan tab yg udah kebuka
+    if (newTab) newTab.location.href = url;
+    else window.open(url, "_blank", "noopener,noreferrer");
+
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+    showToast("Laporan dibuka di tab baru", "success");
+    setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+  } catch (error) {
+    console.error("Error generating report:", error);
+    showToast("Gagal membuat laporan", "error");
+    setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+
+    // ✅ tutup tab kosong kalau gagal
+    try { newTab?.close(); } catch {}
+  }
+};
+
 
   return (
     <div className="status-page">
