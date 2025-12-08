@@ -1160,7 +1160,9 @@ function buildPreviewHTML_AW(vv, jenisKey = "LL") {
   const jenisLabel = vv.jenisSurveyLabel || vv.jenisSurvei || jenisKey;
   // ===== Checkbox printer-friendly =====
   const cb = (checked) =>
-    `<span class="cb"><span class="box">${checked ? "✓" : "&nbsp;"}</span></span>`;
+    `<span class="cb"><span class="box">${
+      checked ? "✓" : "&nbsp;"
+    }</span></span>`;
 
   // Normalisasi label jenis survei agar matching
   const jenisNorm = String(jenisLabel || "")
@@ -1168,11 +1170,14 @@ function buildPreviewHTML_AW(vv, jenisKey = "LL") {
     .replace(/\s+/g, " ")
     .trim();
 
-  const isKeterjaminan   = /keterjaminan/.test(jenisNorm);
-  const isKeabsahanAW    = /ahli\s*waris|keabsahan.*(aw|ahli\s*waris)/.test(jenisNorm);
+  const isKeterjaminan = /keterjaminan/.test(jenisNorm);
+  const isKeabsahanAW = /ahli\s*waris|keabsahan.*(aw|ahli\s*waris)/.test(
+    jenisNorm
+  );
   const isKeabsahanBiaya = /biaya|perawatan|pengobatan/.test(jenisNorm);
-  const jenisLainnyaText = (!isKeterjaminan && !isKeabsahanAW && !isKeabsahanBiaya)
-      ? (vv.jenisLainnya || vv.jenis_survei_lainnya || jenisLabel)
+  const jenisLainnyaText =
+    !isKeterjaminan && !isKeabsahanAW && !isKeabsahanBiaya
+      ? vv.jenisLainnya || vv.jenis_survei_lainnya || jenisLabel
       : "";
   const noPL = vv.noPL || vv.no_pl || "";
   const noBerkas = vv.noBerkas || vv.no_berkas || "";
@@ -1819,7 +1824,9 @@ function renderFotoLampiranSection({
         <div class="page-break"></div>
         <div class="lampiran-page">
           <div class="lampiran-title">
-            ${escapeHtml(title)} ${pages.length > 1 ? `(Hal ${pageIndex + 1})` : ""}
+            ${escapeHtml(title)} ${
+        pages.length > 1 ? `(Hal ${pageIndex + 1})` : ""
+      }
           </div>
           <div class="${wrapClass}">
             ${fotoHtml}
@@ -1989,22 +1996,44 @@ function buildPreviewHTML_RS(vv) {
   <h3>APLIKASI MOBILE PELAYANAN</h3>
 
   <table>
-    <tr><td class="label">NPP / Nama Petugas</td><td>: ${escapeHtml(vv.petugas || "-")}</td></tr>
-    <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${escapeHtml(vv.wilayah || "-")}</td></tr>
-    <tr><td class="label">Nama Korban</td><td>: ${escapeHtml(vv.korban || "-")}</td></tr>
-    <tr><td class="label">Lokasi Kecelakaan</td><td>: ${escapeHtml(vv.lokasiKecelakaan || "-")}</td></tr>
-    <tr><td class="label">Kode RS / Nama RS</td><td>: ${escapeHtml(vv.rumah_sakit || vv.rumahSakit || "-")}</td></tr>
-    <tr><td class="label">Tanggal Kecelakaan</td><td>: ${escapeHtml(vv.tanggal_kecelakaan || vv.tglKecelakaan || "-")}</td></tr>
-    <tr><td class="label">Tanggal Masuk RS</td><td>: ${escapeHtml(vv.tgl_masuk_rs || vv.tglMasukRS || "-")}</td></tr>
-    <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${escapeHtml(vv.tgl_jam_notifikasi || vv.tglJamNotifikasi || "-")}</td></tr>
-    <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${escapeHtml(vv.tgl_jam_kunjungan || vv.tglJamKunjungan || "-")}</td></tr>
+    <tr><td class="label">NPP / Nama Petugas</td><td>: ${escapeHtml(
+      vv.petugas || "-"
+    )}</td></tr>
+    <tr><td class="label">Loket Kantor / Wilayah</td><td>: ${escapeHtml(
+      vv.wilayah || "-"
+    )}</td></tr>
+    <tr><td class="label">Nama Korban</td><td>: ${escapeHtml(
+      vv.korban || "-"
+    )}</td></tr>
+    <tr><td class="label">Lokasi Kecelakaan</td><td>: ${escapeHtml(
+      vv.lokasiKecelakaan || "-"
+    )}</td></tr>
+    <tr><td class="label">Kode RS / Nama RS</td><td>: ${escapeHtml(
+      vv.rumah_sakit || vv.rumahSakit || "-"
+    )}</td></tr>
+    <tr><td class="label">Tanggal Kecelakaan</td><td>: ${escapeHtml(
+      vv.tanggal_kecelakaan || vv.tglKecelakaan || "-"
+    )}</td></tr>
+    <tr><td class="label">Tanggal Masuk RS</td><td>: ${escapeHtml(
+      vv.tgl_masuk_rs || vv.tglMasukRS || "-"
+    )}</td></tr>
+    <tr><td class="label">Tanggal & Jam Notifikasi</td><td>: ${escapeHtml(
+      vv.tgl_jam_notifikasi || vv.tglJamNotifikasi || "-"
+    )}</td></tr>
+    <tr><td class="label">Tanggal & Jam Kunjungan</td><td>: ${escapeHtml(
+      vv.tgl_jam_kunjungan || vv.tglJamKunjungan || "-"
+    )}</td></tr>
   </table>
 
   <div class="section-title">Uraian Hasil Kunjungan:</div>
-  <div class="box">${escapeHtml(vv.uraian || vv.uraianKunjungan || "") || "<i>Belum diisi.</i>"}</div>
+  <div class="box">${
+    escapeHtml(vv.uraian || vv.uraianKunjungan || "") || "<i>Belum diisi.</i>"
+  }</div>
 
   <div class="section-title">Rekomendasi / Kesimpulan:</div>
-  <div class="box">${escapeHtml(vv.rekomendasi || "") || "<i>Belum diisi.</i>"}</div>
+  <div class="box">${
+    escapeHtml(vv.rekomendasi || "") || "<i>Belum diisi.</i>"
+  }</div>
 
   <div class="footer-note">
     Demikian laporan hasil kunjungan ke Rumah Sakit ini kami buat dengan sebenarnya sesuai dengan informasi yang kami peroleh.
@@ -2037,7 +2066,9 @@ function buildPreviewHTML_RS(vv) {
           ? `<img src="${petugasSrc}" alt="TTD Petugas" style="max-height:80px; display:block; margin:4px auto;" onerror="this.style.display='none'"/>`
           : "<br/><br/><br/>"
       }
-      <b>${escapeHtml(vv.petugas || "................................")}</b><br/>
+      <b>${escapeHtml(
+        vv.petugas || "................................"
+      )}</b><br/>
       <i>${escapeHtml(vv.petugas_jabatan || vv.petugasJabatan || "")}</i>
     </div>
   </div>
@@ -2113,7 +2144,6 @@ function buildPreviewHTML_RS(vv) {
   </html>`;
 }
 
-
 /* ==========================================
    KOMPONEN UTAMA
    ========================================== */
@@ -2126,6 +2156,10 @@ export default function StatusProses() {
   const [loading, setLoading] = useState(true);
   const [generatingPreviews, setGeneratingPreviews] = useState({});
   const navigate = useNavigate();
+
+  useEffect(() => {
+    console.log("[StatusProses] mounted");
+  }, []);
 
   const [ttdUrl, setTtdUrl] = useState("");
   useEffect(() => {
@@ -2329,9 +2363,13 @@ export default function StatusProses() {
      ------------------------------ */
   const filtered = useMemo(() => {
     let rows = data.filter((r) => {
+      const name = String(r.name || "");
+      const docType = String(r.docType || "");
+      const qq = q.toLowerCase();
+
       const matchText =
-        r.name.toLowerCase().includes(q.toLowerCase()) ||
-        r.docType.toLowerCase().includes(q.toLowerCase());
+        name.toLowerCase().includes(qq) || docType.toLowerCase().includes(qq);
+
       const matchStatus = status === "Semua" ? true : r.status === status;
       return matchText && matchStatus;
     });
@@ -2427,6 +2465,20 @@ export default function StatusProses() {
         )}
       </>
     );
+  };
+
+  const fmtDateSafe = (ms) => {
+    const t = Number(ms);
+    if (!Number.isFinite(t)) return "-";
+    try {
+      return new Date(t).toLocaleDateString("id-ID", {
+        day: "2-digit",
+        month: "long",
+        year: "numeric",
+      });
+    } catch {
+      return "-";
+    }
   };
 
   const renderRejectedContent = (row) => {
@@ -2613,109 +2665,115 @@ export default function StatusProses() {
      - Andi TTD muncul hanya saat status selesai (done)
      ============================================================ */
   const handleDownloadReport = async (record) => {
-  const recordId =
-    record._raw?.id || record._raw?.local_id || record._raw?.uuid;
+    const recordId =
+      record._raw?.id ||
+      record._raw?.local_id ||
+      record._raw?.uuid ||
+      record?.id ||
+      `${Date.now()}`;
 
-  // ✅ buka tab baru LANGSUNG saat klik (biar gak diblokir)
-  const newTab = window.open("", "_blank", "noopener,noreferrer");
+    // ✅ buka tab baru LANGSUNG saat klik (biar gak diblokir)
+    const newTab = window.open("", "_blank", "noopener,noreferrer");
 
-  try {
-    setGeneratingPreviews((prev) => ({ ...prev, [recordId]: true }));
-    showToast("Menyiapkan laporan...", "info");
+    try {
+      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: true }));
+      showToast("Menyiapkan laporan...", "info");
 
-    // 1) ambil detail SEBENARNYA dari tabel sesuai varian
-    const { variant, row } = await fetchDetailFromSupabase(record._raw);
-    if (!row) throw new Error("Detail row tidak ditemukan");
+      // 1) ambil detail SEBENARNYA dari tabel sesuai varian
+      const { variant, row } = await fetchDetailFromSupabase(record._raw);
+      if (!row) throw new Error("Detail row tidak ditemukan");
 
-    const normalizedData = normalizeDetailRow(variant, row);
+      const normalizedData = normalizeDetailRow(variant, row);
 
-    // 2) cek stamped pdf terbaru di detail (bukan list)
-    const ver =
-      (normalizedData.counts && normalizedData.counts.verifikator) || {};
-    const stampedPdfUrl =
-      ver.stampedPdfUrl ||
-      normalizedData.files?.hasilFormPdf ||
-      normalizedData.files?.pdfUrl ||
-      null;
+      // 2) cek stamped pdf terbaru di detail (bukan list)
+      const ver =
+        (normalizedData.counts && normalizedData.counts.verifikator) || {};
+      const stampedPdfUrl =
+        ver.stampedPdfUrl ||
+        normalizedData.files?.hasilFormPdf ||
+        normalizedData.files?.pdfUrl ||
+        null;
 
-    const isRealPdf =
-      stampedPdfUrl &&
-      typeof stampedPdfUrl === "string" &&
-      stampedPdfUrl.trim() !== "" &&
-      !stampedPdfUrl.includes("/Lembar_Kunjungan_RS_NAI.pdf");
+      const isRealPdf =
+        stampedPdfUrl &&
+        typeof stampedPdfUrl === "string" &&
+        stampedPdfUrl.trim() !== "" &&
+        !stampedPdfUrl.includes("/Lembar_Kunjungan_RS_NAI.pdf");
 
-    if (isRealPdf) {
-      showToast("Membuka laporan PDF...", "info");
+      if (isRealPdf) {
+        showToast("Membuka laporan PDF...", "info");
 
-      // ✅ arahkan tab yg udah kebuka
-      if (newTab) newTab.location.href = stampedPdfUrl;
-      else window.open(stampedPdfUrl, "_blank", "noopener,noreferrer");
+        // ✅ arahkan tab yg udah kebuka
+        if (newTab) newTab.location.href = stampedPdfUrl;
+        else window.open(stampedPdfUrl, "_blank", "noopener,noreferrer");
 
-      showToast("Laporan dibuka", "success");
+        showToast("Laporan dibuka", "success");
+        setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+        return;
+      }
+
+      // 3) kalau belum ada pdf, generate HTML preview sesuai record
+      const vv = await prepareForOutput(
+        {
+          ...normalizedData,
+          createdAt:
+            record._raw?.created_at ||
+            record._raw?.waktu ||
+            normalizedData.createdAt,
+          waktu: record._raw?.waktu || normalizedData.waktu,
+          id: record._raw?.id || record._raw?.local_id || normalizedData.id,
+          local_id: record._raw?.local_id || normalizedData.local_id,
+        },
+        variant
+      );
+
+      vv.andiTtdUrl = ttdUrl || "/andi-ttd.jpeg";
+
+      const rawStatus = String(
+        normalizedData.status || record._raw?.status || record.status || ""
+      ).toLowerCase();
+
+      const done =
+        rawStatus === "selesai" ||
+        rawStatus === "disetujui" ||
+        normalizedData.finishedAt ||
+        normalizedData.verifiedAt ||
+        normalizedData.verified ||
+        record._raw?.finished_at ||
+        record._raw?.verified_at;
+
+      vv.__verStatus = done ? "disetujui" : null;
+      vv.status = normalizedData.status || record._raw?.status || vv.status;
+
+      let html = "";
+      if (variant === "md") html = await buildPreviewHTML_MD(vv);
+      else if (variant === "ll") html = buildPreviewHTML_LL(vv);
+      else if (variant === "rs") html = buildPreviewHTML_RS(vv);
+
+      // 4) bikin Blob URL (lebih aman dari data URL panjang)
+      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+
+      // arahkan tab yg udah kebuka
+      if (newTab) newTab.location.href = url;
+      else window.open(url, "_blank", "noopener,noreferrer");
+
+      // optional: bersihin blob url biar ga numpuk di memory
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+
+      showToast("Laporan dibuka di tab baru", "success");
       setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
-      return;
+    } catch (error) {
+      console.error("Error generating report:", error);
+      showToast("Gagal membuat laporan", "error");
+      setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
+
+      // ✅ tutup tab kosong kalau gagal
+      try {
+        newTab?.close();
+      } catch {}
     }
-
-    // 3) kalau belum ada pdf, generate HTML preview sesuai record
-    const vv = await prepareForOutput(
-      {
-        ...normalizedData,
-        createdAt:
-          record._raw?.created_at ||
-          record._raw?.waktu ||
-          normalizedData.createdAt,
-        waktu: record._raw?.waktu || normalizedData.waktu,
-        id: record._raw?.id || record._raw?.local_id || normalizedData.id,
-        local_id: record._raw?.local_id || normalizedData.local_id,
-      },
-      variant
-    );
-
-    vv.andiTtdUrl = ttdUrl || "/andi-ttd.jpeg";
-
-    const rawStatus = String(
-      normalizedData.status ||
-        record._raw?.status ||
-        record.status ||
-        ""
-    ).toLowerCase();
-
-    const done =
-      rawStatus === "selesai" ||
-      rawStatus === "disetujui" ||
-      normalizedData.finishedAt ||
-      normalizedData.verifiedAt ||
-      normalizedData.verified ||
-      record._raw?.finished_at ||
-      record._raw?.verified_at;
-
-    vv.__verStatus = done ? "disetujui" : null;
-    vv.status = normalizedData.status || record._raw?.status || vv.status;
-
-    let html = "";
-    if (variant === "md") html = await buildPreviewHTML_MD(vv);
-    else if (variant === "ll") html = buildPreviewHTML_LL(vv);
-    else if (variant === "rs") html = buildPreviewHTML_RS(vv);
-
-    // 4) bikin blob url
-    const url = "data:text/html;charset=utf-8," + encodeURIComponent(html);
-
-// arahkan tab yg udah kebuka
-if (newTab) newTab.location.href = url;
-else window.open(url, "_blank", "noopener,noreferrer");
-
-    showToast("Laporan dibuka di tab baru", "success");
-    setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
-  } catch (error) {
-    console.error("Error generating report:", error);
-    showToast("Gagal membuat laporan", "error");
-    setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
-
-    // ✅ tutup tab kosong kalau gagal
-    try { newTab?.close(); } catch {}
-  }
-};
-
+  };
 
   return (
     <div className="status-page">
@@ -2807,11 +2865,7 @@ else window.open(url, "_blank", "noopener,noreferrer");
                       {r.docType}
                     </td>
                     <td data-label="Tanggal Pembaruan">
-                      {new Date(r.dateMs).toLocaleDateString("id-ID", {
-                        day: "2-digit",
-                        month: "long",
-                        year: "numeric",
-                      })}
+                      {fmtDateSafe(r.dateMs)}
                     </td>
                     <td data-label="Status Proses">
                       <Badge status={r.status} />
