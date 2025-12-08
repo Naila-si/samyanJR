@@ -260,10 +260,6 @@ function buildPlatSummary(plates = []) {
   HALAMAN: HASIL SURVEI
   ========================================================= */
 export default function HasilSurvey({ data = {}, setData, next, back, playBeep }) {
-  useEffect(() => {
-    localStorage.clear();
-    console.log("LocalStorage dikosongkan saat halaman dimuat");
-  }, []);
 
   const set = (k) => (e) => setData?.({ ...data, [k]: e.target.value });
 
@@ -301,7 +297,6 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     filesNeeded.forEach(f => {
       console.log(`Cek dokumen ${f.label}:`, att[f.key] ? "✔ Terunggah" : "⛔ Belum diunggah");
     });
-    localStorage.setItem("hasilSurveyData", JSON.stringify(att));
     console.log("Cek fotoSurveyList:", (att.fotoSurvey || []).length ? "✔ Terunggah" : "⛔ Belum diunggah");
   }, [att]);
 

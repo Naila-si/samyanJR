@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { useAdminRefresh } from "../hooks/useAdminRefresh";
 import "../styles/datasw.css";
 
 /* ===================== utils ===================== */
@@ -89,8 +90,7 @@ function validate(form) {
 function toNulls(obj) {
   const out = {};
   for (const [k, v] of Object.entries(obj || {})) {
-    // ubah "" jadi null, selain itu biarkan apa adanya
-    out[k] = (v === "") ? null : v;
+    out[k] = v === "" ? null : v;
   }
   return out;
 }
@@ -98,12 +98,9 @@ function toNulls(obj) {
 /* ===================== main component ===================== */
 export default function DataSW() {
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterHp, setFilterHp] = useState("all"); // "all" | "ada" | "kosong"
-  const [loadedAt, setLoadedAt] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
-  const [toast, setToast] = useState(null); // {type:"error"|"success", msg:string} | null
 
   // modal states
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -121,36 +118,36 @@ export default function DataSW() {
 
   function showSupabaseError(error) {
     if (!error) return "Unknown error";
-    const { code, message, details, hint } = error;
-    // log lengkap ke console
-    console.error("Supabase error:", { code, message, details, hint });
-    // tampilkan ringkas di UI
+    const { message, details, hint } = error;
+    console.error("Supabase error:", error);
     return [message, details, hint].filter(Boolean).join(" — ");
   }
 
-  /* ---- fetch ---- */
-  async function fetchData() {
-    setLoading(true);
+  /* ========= FETCHER untuk useAdminRefresh ========= */
+  const fetcherSW = useCallback(async () => {
     setErrorMsg("");
 
-    // 1) cek struktur dulu pakai select("*")
     const { data, error } = await supabase
       .from("data_sw")
-      .select("*") // <-- sementara pakai wildcard
-      .order("tgl_transaksi", { ascending: true }) // kalau kolom ini salah, kita ketahuan di sini
+      .select("*")
+      .order("tgl_transaksi", { ascending: true })
       .limit(2000);
 
-    if (error) {
-      setErrorMsg(showSupabaseError(error));
-      setRows([]);
-    } else {
-      setRows(data || []);
-      setLoadedAt(new Date());
-    }
+    if (error) throw error;
+    return data || [];
+  }, []);
 
-    setLoading(false);
-    firstLoad.current = false;
-  }
+  const { loading, loadedAt, toast, setToast, refresh } =
+    useAdminRefresh(async () => {
+      const data = await fetcherSW();
+      setRows(data);
+      firstLoad.current = false;
+      return data; // penting buat hook
+    }, "Data SW berhasil diperbarui");
+
+  useEffect(() => {
+    refresh();
+  }, []);
 
   /* ---- realtime sync ---- */
   useEffect(() => {
@@ -176,9 +173,7 @@ export default function DataSW() {
       )
       .subscribe();
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => supabase.removeChannel(channel);
   }, []);
 
   /* ---- filter ---- */
@@ -199,9 +194,11 @@ export default function DataSW() {
   const [pageSize, setPageSize] = useState(50);
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
   useEffect(() => {
     setPage(1);
   }, [debounced, filterHp, pageSize, rows]);
+
   const startIdx = (page - 1) * pageSize;
   const endIdx = Math.min(startIdx + pageSize, total);
   const paginated = useMemo(() => filtered.slice(startIdx, endIdx), [filtered, startIdx, endIdx]);
@@ -242,14 +239,12 @@ export default function DataSW() {
 
     try {
       if (formMode === "create") {
-        // (opsi per-user) kalau policy pakai auth, tambahkan owner_uid di payload
         const payload = toNulls(form);
-        const { data, error } = await supabase.from("data_sw").insert([payload]).select();
+        const { error } = await supabase.from("data_sw").insert([payload]);
         if (error) throw error;
 
-        // fallback kalau Realtime mati
-        if (data?.length) setRows((prev) => [data[0], ...prev]);
         setIsFormOpen(false);
+        await refresh(); // ✅ samain refresh global
         setToast({ type: "success", msg: "Berhasil menambah data" });
       } else {
         if (!editingId) {
@@ -257,23 +252,19 @@ export default function DataSW() {
           return;
         }
         const payload = toNulls(form);
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from("data_sw")
           .update(payload)
-          .eq("id", editingId)
-          .select();
-
+          .eq("id", editingId);
         if (error) throw error;
-        if (data?.length) {
-          const updated = data[0];
-          setRows((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
-        }
+
         setIsFormOpen(false);
+        await refresh(); // ✅ samain refresh global
         setToast({ type: "success", msg: "Perubahan disimpan" });
       }
     } catch (err) {
-      const { message, details, hint, code } = err || {};
       console.error("UPDATE/INSERT error:", err);
+      setErrorMsg(showSupabaseError(err));
       setToast({ type: "error", msg: err?.message || "Operasi gagal" });
     }
   }
@@ -288,11 +279,11 @@ export default function DataSW() {
       const { error } = await supabase.from("data_sw").delete().eq("id", row.id);
       if (error) throw error;
 
-      // fallback kalau Realtime mati
-      setRows((prev) => prev.filter((r) => r.id !== row.id));
+      await refresh(); // ✅ samain refresh global
       setToast({ type: "success", msg: "Data terhapus" });
     } catch (err) {
       console.error(err);
+      setErrorMsg(showSupabaseError(err));
       setToast({ type: "error", msg: err?.message || "Gagal menghapus" });
     }
   }
@@ -322,8 +313,14 @@ export default function DataSW() {
           <button className="kawaii-btn ghost" onClick={() => exportCsv(filtered)}>
             ⬇️ Export CSV
           </button>
-          <button className="kawaii-btn" onClick={fetchData}>
-            🔄 Refresh
+          <button
+            className="kawaii-btn"
+            onClick={refresh}
+            disabled={loading}
+            title="Muat ulang data dari server"
+            style={{ opacity: loading ? 0.7 : 1, cursor: loading ? "not-allowed" : "pointer" }}
+          >
+            {loading ? "⏳ Loading..." : "🔄 Refresh"}
           </button>
         </div>
       </header>
@@ -366,6 +363,7 @@ export default function DataSW() {
         <div className="loading">⏳ Memuat data...</div>
       ) : (
         <>
+          {/* pager atas */}
           {totalPages > 1 && (
             <div className="pager">
               <div className="pager-left">
@@ -384,33 +382,11 @@ export default function DataSW() {
                 </label>
               </div>
               <div className="pager-right">
-                <button className="pg-btn" onClick={() => setPage(1)} disabled={page === 1}>
-                  ⏮
-                </button>
-                <button
-                  className="pg-btn"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  ◀
-                </button>
-                <span className="page-num">
-                  Hal {page} / {totalPages}
-                </span>
-                <button
-                  className="pg-btn"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                >
-                  ▶
-                </button>
-                <button
-                  className="pg-btn"
-                  onClick={() => setPage(totalPages)}
-                  disabled={page === totalPages}
-                >
-                  ⏭
-                </button>
+                <button className="pg-btn" onClick={() => setPage(1)} disabled={page === 1}>⏮</button>
+                <button className="pg-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>◀</button>
+                <span className="page-num">Hal {page} / {totalPages}</span>
+                <button className="pg-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>▶</button>
+                <button className="pg-btn" onClick={() => setPage(totalPages)} disabled={page === totalPages}>⏭</button>
               </div>
             </div>
           )}
@@ -439,43 +415,24 @@ export default function DataSW() {
                   return (
                     <tr key={key} onDoubleClick={() => openDetail(row)} className="row-hover">
                       <td className="aksi-col">
-                        <button className="btn tiny" onClick={() => openDetail(row)}>
-                          👁️ Detail
-                        </button>
-                        <button className="btn tiny" onClick={() => openEdit(row)}>
-                          ✏️ Edit
-                        </button>
-                        <button className="btn tiny danger" onClick={() => handleDelete(row)}>
-                          🗑️ Hapus
-                        </button>
+                        <button className="btn tiny" onClick={() => openDetail(row)}>👁️ Detail</button>
+                        <button className="btn tiny" onClick={() => openEdit(row)}>✏️ Edit</button>
+                        <button className="btn tiny danger" onClick={() => handleDelete(row)}>🗑️ Hapus</button>
                       </td>
                       <td>{row.tgl_transaksi || "-"}</td>
-                      <td className="mono">
-                        <Highlight text={row.no_polisi} q={debounced} />
-                      </td>
-                      <td>
-                        <Highlight text={row.nama_pemilik_terakhir} q={debounced} />
-                      </td>
+                      <td className="mono"><Highlight text={row.no_polisi} q={debounced} /></td>
+                      <td><Highlight text={row.nama_pemilik_terakhir} q={debounced} /></td>
                       <td>{row.tgl_mati_yad || "-"}</td>
-                      <td>
-                        <span className="gol-badge">{row.kode_golongan || "-"}</span>
-                      </td>
-                      <td className="alamat">
-                        <Highlight text={row.alamat_pemilik_terakhir} q={debounced} />
-                      </td>
-                      <td className={hpKosong ? "muted" : ""}>
-                        {hpKosong ? "—" : row.nomor_hp}
-                      </td>
-                      <td className="mono">
-                        <Highlight text={row.nik || "-"} q={debounced} />
-                      </td>
+                      <td><span className="gol-badge">{row.kode_golongan || "-"}</span></td>
+                      <td className="alamat"><Highlight text={row.alamat_pemilik_terakhir} q={debounced} /></td>
+                      <td className={hpKosong ? "muted" : ""}>{hpKosong ? "—" : row.nomor_hp}</td>
+                      <td className="mono"><Highlight text={row.nik || "-"} q={debounced} /></td>
                       <td>{row.prov_nama}</td>
-                      <td>
-                        <Highlight text={row.deskripsi_plat} q={debounced} />
-                      </td>
+                      <td><Highlight text={row.deskripsi_plat} q={debounced} /></td>
                     </tr>
                   );
                 })}
+
                 {!paginated.length && (
                   <tr>
                     <td colSpan={11} style={{ textAlign: "center", padding: "16px" }}>
@@ -487,6 +444,7 @@ export default function DataSW() {
             </table>
           </div>
 
+          {/* pager bawah */}
           {totalPages > 1 && (
             <div className="pager">
               <div className="pager-left">
@@ -505,45 +463,38 @@ export default function DataSW() {
                 </label>
               </div>
               <div className="pager-right">
-                <button className="pg-btn" onClick={() => setPage(1)} disabled={page === 1}>
-                  ⏮
-                </button>
-                <button
-                  className="pg-btn"
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                >
-                  ◀
-                </button>
-                <span className="page-num">
-                  Hal {page} / {totalPages}
-                </span>
-                <button
-                  className="pg-btn"
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                >
-                  ▶
-                </button>
-                <button
-                  className="pg-btn"
-                  onClick={() => setPage(totalPages)}
-                  disabled={page === totalPages}
-                >
-                  ⏭
-                </button>
+                <button className="pg-btn" onClick={() => setPage(1)} disabled={page === 1}>⏮</button>
+                <button className="pg-btn" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>◀</button>
+                <span className="page-num">Hal {page} / {totalPages}</span>
+                <button className="pg-btn" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page === totalPages}>▶</button>
+                <button className="pg-btn" onClick={() => setPage(totalPages)} disabled={page === totalPages}>⏭</button>
               </div>
             </div>
           )}
         </>
       )}
 
+      {/* ✅ TOAST sama kayak halaman lain */}
       {toast && (
-        <div className={`toast ${toast.type === "error" ? "error" : "success"}`} onAnimationEnd={() => setToast(null)}>
+        <div
+          className={`toast ${toast.type === "error" ? "error" : "success"}`}
+          onAnimationEnd={() => setToast(null)}
+        >
           {toast.msg}
         </div>
       )}
 
+      {/* keyframes kalau css kamu belum punya */}
+      <style>{`
+        @keyframes toastHide {
+          0% { opacity: 0; transform: translateY(8px); }
+          10% { opacity: 1; transform: translateY(0); }
+          85% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(8px); }
+        }
+      `}</style>
+
+      {/* ===== MODAL FORM (tetap sama) ===== */}
       {isFormOpen && (
         <div className="modal-backdrop" onClick={() => setIsFormOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -574,7 +525,9 @@ export default function DataSW() {
                 <span>Nama Pemilik</span>
                 <input
                   value={form.nama_pemilik_terakhir}
-                  onChange={(e) => setForm({ ...form, nama_pemilik_terakhir: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, nama_pemilik_terakhir: e.target.value })
+                  }
                 />
               </label>
               <label>
@@ -590,7 +543,12 @@ export default function DataSW() {
                 <span>Alamat</span>
                 <input
                   value={form.alamat_pemilik_terakhir}
-                  onChange={(e) => setForm({ ...form, alamat_pemilik_terakhir: e.target.value })}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      alamat_pemilik_terakhir: e.target.value,
+                    })
+                  }
                 />
               </label>
               <label>
@@ -604,14 +562,18 @@ export default function DataSW() {
                 <span>Kode Golongan</span>
                 <input
                   value={form.kode_golongan}
-                  onChange={(e) => setForm({ ...form, kode_golongan: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, kode_golongan: e.target.value })
+                  }
                 />
               </label>
               <label>
                 <span>Deskripsi Plat</span>
                 <input
                   value={form.deskripsi_plat}
-                  onChange={(e) => setForm({ ...form, deskripsi_plat: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, deskripsi_plat: e.target.value })
+                  }
                 />
               </label>
               <label>
@@ -619,7 +581,9 @@ export default function DataSW() {
                 <input
                   type="date"
                   value={form.tgl_transaksi || ""}
-                  onChange={(e) => setForm({ ...form, tgl_transaksi: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, tgl_transaksi: e.target.value })
+                  }
                 />
               </label>
               <label>
@@ -627,12 +591,18 @@ export default function DataSW() {
                 <input
                   type="date"
                   value={form.tgl_mati_yad || ""}
-                  onChange={(e) => setForm({ ...form, tgl_mati_yad: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, tgl_mati_yad: e.target.value })
+                  }
                 />
               </label>
 
               <div className="modal-foot">
-                <button type="button" className="btn ghost" onClick={() => setIsFormOpen(false)}>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => setIsFormOpen(false)}
+                >
                   Batal
                 </button>
                 <button type="submit" className="btn primary">
@@ -644,6 +614,7 @@ export default function DataSW() {
         </div>
       )}
 
+      {/* ===== DRAWER DETAIL (tetap sama) ===== */}
       {detailOpen && detailRow && (
         <div className="drawer-backdrop" onClick={() => setDetailOpen(false)}>
           <aside className="drawer" onClick={(e) => e.stopPropagation()}>
@@ -658,7 +629,9 @@ export default function DataSW() {
                 ["Nama Pemilik", detailRow.nama_pemilik_terakhir],
                 [
                   "Nomor HP",
-                  !((detailRow.nomor_hp || "").trim()) || detailRow.nomor_hp === "0" ? "—" : detailRow.nomor_hp,
+                  !((detailRow.nomor_hp || "").trim()) || detailRow.nomor_hp === "0"
+                    ? "—"
+                    : detailRow.nomor_hp,
                 ],
                 ["Alamat", detailRow.alamat_pemilik_terakhir],
                 ["Provinsi", detailRow.prov_nama],

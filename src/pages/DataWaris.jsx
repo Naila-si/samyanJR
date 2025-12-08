@@ -1,25 +1,6 @@
-// src/pages/DataAhliWaris.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
-
-const LS_KEY = "ahliwaris_points_v2";
-
-// === Dummy 20 data ===
-const DUMMY20 = Array.from({ length: 20 }, (_, i) => ({
-  id: String(i + 1),
-  korbanNama: `Korban ${i + 1}`,
-  gender: i % 2 === 0 ? "L" : "P",
-  korbanFoto:
-    i % 2 === 0
-      ? `https://randomuser.me/api/portraits/men/${(i % 50) + 1}.jpg`
-      : `https://randomuser.me/api/portraits/women/${(i % 50) + 1}.jpg`,
-  ahliWarisNama: `Ahli Waris ${i + 1}`,
-  ahliWarisAlamat: `Kecamatan ${i + 1}, Kota Pekanbaru`,
-  jalan: `Jl. Contoh No.${i + 1}, Pekanbaru`,
-  lat: Number((0.5 + i * 0.001).toFixed(6)),
-  lng: Number((101.44 + i * 0.001).toFixed(6)),
-  santunan: 10_000_000 + i * 500_000,
-  createdAt: new Date(Date.now() - i * 86400000).toISOString(),
-}));
+import { useEffect, useMemo, useState, useCallback } from "react";
+import { supabase } from "../lib/supabaseClient";
+import { useAdminRefresh } from "../hooks/useAdminRefresh";
 
 // ========= Mini helpers =========
 const currency = (n) => `Rp ${Number(n || 0).toLocaleString("id-ID")}`;
@@ -31,6 +12,9 @@ const fmtDate = (iso) =>
         year: "numeric",
       })
     : "-";
+
+const monthKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 
 // ========= Modal (reusable) =========
 function Modal({ open, onClose, title, children, footer }) {
@@ -86,7 +70,8 @@ function Modal({ open, onClose, title, children, footer }) {
 function Donut({ value, color = "#ef4f65", label = "" }) {
   const r = 52;
   const c = 2 * Math.PI * r;
-  const off = c * (1 - Math.min(Math.max(value, 0), 100) / 100);
+  const v = Number.isFinite(value) ? value : 0;
+  const off = c * (1 - Math.min(Math.max(v, 0), 100) / 100);
   return (
     <div style={{ display: "grid", placeItems: "center" }}>
       <svg width="140" height="140" viewBox="0 0 140 140">
@@ -112,7 +97,7 @@ function Donut({ value, color = "#ef4f65", label = "" }) {
           fontSize="18"
           fill="#111827"
         >
-          {value}%
+          {v}%
         </text>
       </svg>
       <div style={{ marginTop: 4, fontSize: 14 }}>{label}</div>
@@ -122,7 +107,6 @@ function Donut({ value, color = "#ef4f65", label = "" }) {
 
 // ========= MiniBar (satu kategori) =========
 function MiniBar({ title, data }) {
-  // data: [{label, value}]
   const max = Math.max(1, ...data.map((d) => d.value || 0));
   return (
     <div
@@ -163,23 +147,42 @@ function MiniBar({ title, data }) {
 }
 
 export default function DataAhliWaris() {
-  // ====== DATA STATE ======
   const [rows, setRows] = useState([]);
-  const persist = (arr) => {
-    setRows(arr);
-    localStorage.setItem(LS_KEY, JSON.stringify(arr));
-  };
+
+  const fetcherWaris = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("data_waris")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    return (data || []).map((r) => ({
+      id: r.id,
+      korbanNama: r.nama_korban,
+      gender: r.jenis_kelamin_aw,
+      ahliWarisNama: r.nama_penerima_aw || "",
+      ahliWarisAlamat: r.alamat_aw || "",
+      jalan: r.jalan_aw || "",
+      lat: r.lat_aw ?? "",
+      lng: r.lng_aw ?? "",
+      santunan: r.jumlah_santunan ?? 0,
+      createdAt: r.created_at,
+    }));
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    const mapped = await fetcherWaris();
+    setRows(mapped);
+    return mapped;
+  }, [fetcherWaris]);
+
+  const { loading, loadedAt, toast, setToast, refresh } =
+    useAdminRefresh(onRefresh, "Data ahli waris berhasil diperbarui");
 
   useEffect(() => {
-    const saved = localStorage.getItem(LS_KEY);
-    if (saved) {
-      try {
-        setRows(JSON.parse(saved));
-        return;
-      } catch {}
-    }
-    persist(DUMMY20);
-  }, []);
+    refresh(); // ✅ sekarang aman, ga loop
+  }, [refresh]);
 
   // ====== TABLE CONTROL ======
   const [q, setQ] = useState("");
@@ -187,6 +190,7 @@ export default function DataAhliWaris() {
   const [page, setPage] = useState(1);
   const pageSize = 5;
 
+  // filtered = data yang ngikut search + sort (ini jadi sumber grafik)
   const filtered = useMemo(() => {
     const key = q.trim().toLowerCase();
     const base = !key
@@ -216,60 +220,81 @@ export default function DataAhliWaris() {
   }, [filtered, page]);
 
   useEffect(() => {
-    // kalau hasil filter/urut bikin halaman melebihi total, kembalikan ke 1
     if (page > totalPages) setPage(1);
   }, [totalPages, page]);
 
-  // ====== GRAFIK (semua berdasar "paged") ======
-  // Bulanan: sum, count, avg dari 5 data yang tampil
+  // ====== GRAFIK (BERDASAR filtered, bukan paged) ======
+
+  // 1) Monthly aggregate: sum santunan + count korban per bulan, ambil last 6 bulan yang ada datanya
   const monthlyAgg = useMemo(() => {
-    if (paged.length === 0) return [];
+    if (filtered.length === 0) return [];
+
     const map = new Map();
-    for (const r of paged) {
+
+    for (const r of filtered) {
       const t = r.createdAt ? new Date(r.createdAt) : new Date();
-      const key = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`;
-      const sum = (map.get(key)?.sum || 0) + (r.santunan || 0);
-      const count = (map.get(key)?.count || 0) + 1;
-      map.set(key, { sum, count, year: t.getFullYear(), month: t.getMonth() });
+      const key = monthKey(t);
+
+      const prev = map.get(key) || {
+        sum: 0,
+        count: 0,
+        year: t.getFullYear(),
+        month: t.getMonth(),
+      };
+
+      prev.sum += Number(r.santunan || 0);
+      prev.count += 1;
+      map.set(key, prev);
     }
+
     const ordered = [...map.entries()]
       .sort(([a], [b]) => (a < b ? -1 : 1))
       .map(([_, v]) => ({
-        label: new Date(v.year, v.month, 1).toLocaleDateString("id-ID", { month: "short" }),
+        label: new Date(v.year, v.month, 1).toLocaleDateString("id-ID", {
+          month: "short",
+        }),
         sum: v.sum,
         count: v.count,
-        avg: Math.round(v.sum / v.count),
+        avg: v.count ? Math.round(v.sum / v.count) : 0,
       }));
+
     return ordered.slice(-6);
-  }, [paged]);
+  }, [filtered]);
 
   const barSantunan = monthlyAgg.map((d) => ({ label: d.label, value: d.sum }));
   const barKorban = monthlyAgg.map((d) => ({ label: d.label, value: d.count }));
   const barRata = monthlyAgg.map((d) => ({ label: d.label, value: d.avg }));
 
-  // Donut (berdasar paged)
+  // 2) Donut real: proporsi gender dari jumlah korban + proporsi santunan
   const donutData = useMemo(() => {
-    const total = paged.length || 1;
-    const l = paged.filter((r) => r.gender === "L").length;
-    const p = paged.filter((r) => r.gender === "P").length;
-    const pl = Math.round((l / total) * 100);
-    const pp = Math.round((p / total) * 100);
-    // placeholder usia (tanpa field umur). Jika nanti ada field umur, ubah logikanya.
-    const u17 = 0;
-    const a18 = 100;
-    return { p: pp, l: pl, u17, a18 };
-  }, [paged]);
+    const totalKorban = filtered.length || 1;
+
+    const lKorban = filtered.filter((r) => r.gender === "L").length;
+    const pKorban = filtered.filter((r) => r.gender === "P").length;
+
+    const totalSantunan = filtered.reduce((a, r) => a + Number(r.santunan || 0), 0) || 1;
+    const lSant = filtered
+      .filter((r) => r.gender === "L")
+      .reduce((a, r) => a + Number(r.santunan || 0), 0);
+    const pSant = filtered
+      .filter((r) => r.gender === "P")
+      .reduce((a, r) => a + Number(r.santunan || 0), 0);
+
+    return {
+      korbanP: Math.round((pKorban / totalKorban) * 100),
+      korbanL: Math.round((lKorban / totalKorban) * 100),
+      santP: Math.round((pSant / totalSantunan) * 100),
+      santL: Math.round((lSant / totalSantunan) * 100),
+    };
+  }, [filtered]);
 
   // ====== CRUD (modal tambah/edit) ======
   const [openModal, setOpenModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
-  const fileRef = useRef(null);
-  const [preview, setPreview] = useState("");
 
   const [form, setForm] = useState({
     korbanNama: "",
     gender: "L",
-    fotoUrl: "",
     ahliWarisNama: "",
     ahliWarisAlamat: "",
     jalan: "",
@@ -278,19 +303,11 @@ export default function DataAhliWaris() {
     santunan: "",
   });
 
-  // revoke preview blob
-  useEffect(() => {
-    return () => {
-      if (preview?.startsWith("blob:")) URL.revokeObjectURL(preview);
-    };
-  }, [preview]);
-
   const openAdd = () => {
     setEditingId(null);
     setForm({
       korbanNama: "",
       gender: "L",
-      fotoUrl: "",
       ahliWarisNama: "",
       ahliWarisAlamat: "",
       jalan: "",
@@ -298,8 +315,6 @@ export default function DataAhliWaris() {
       lng: "",
       santunan: "",
     });
-    if (fileRef.current) fileRef.current.value = "";
-    setPreview("");
     setOpenModal(true);
   };
 
@@ -308,7 +323,6 @@ export default function DataAhliWaris() {
     setForm({
       korbanNama: row.korbanNama,
       gender: row.gender || "L",
-      fotoUrl: row.korbanFoto?.startsWith("http") ? row.korbanFoto : "",
       ahliWarisNama: row.ahliWarisNama,
       ahliWarisAlamat: row.ahliWarisAlamat,
       jalan: row.jalan,
@@ -316,16 +330,7 @@ export default function DataAhliWaris() {
       lng: String(row.lng),
       santunan: String(row.santunan),
     });
-    setPreview(row.korbanFoto?.startsWith("blob:") ? row.korbanFoto : "");
-    if (fileRef.current) fileRef.current.value = "";
     setOpenModal(true);
-  };
-
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) return setPreview("");
-    const url = URL.createObjectURL(f);
-    setPreview(url);
   };
 
   const validate = () => {
@@ -350,68 +355,51 @@ export default function DataAhliWaris() {
     return "";
   };
 
-  const submitForm = () => {
+  const submitForm = async () => {
     const v = validate();
-    if (v) {
-      alert(v);
-      return;
-    }
-    const lat = Number(form.lat);
-    const lng = Number(form.lng);
-    const santunan = Number(String(form.santunan).replace(/[^\d]/g, ""));
-    const foto =
-      preview ||
-      (form.fotoUrl?.trim() ||
-        "https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=600&q=80&auto=format&fit=crop");
+    if (v) return alert(v);
 
-    if (editingId) {
-      const updated = rows.map((r) =>
-        r.id === editingId
-          ? {
-              ...r,
-              korbanNama: form.korbanNama.trim(),
-              gender: form.gender,
-              korbanFoto: foto,
-              ahliWarisNama: form.ahliWarisNama.trim(),
-              ahliWarisAlamat: form.ahliWarisAlamat.trim(),
-              jalan: form.jalan.trim(),
-              lat,
-              lng,
-              santunan,
-            }
-          : r
-      );
-      persist(updated);
-      setOpenModal(false);
-      return;
-    }
-
-    const newRow = {
-      id: String(Date.now()),
-      korbanNama: form.korbanNama.trim(),
-      gender: form.gender,
-      korbanFoto: foto,
-      ahliWarisNama: form.ahliWarisNama.trim(),
-      ahliWarisAlamat: form.ahliWarisAlamat.trim(),
-      jalan: form.jalan.trim(),
-      lat,
-      lng,
-      santunan,
-      createdAt: new Date().toISOString(),
+    const payload = {
+      nama_korban: form.korbanNama.trim(),
+      jenis_kelamin_aw: form.gender,
+      nama_penerima_aw: form.ahliWarisNama.trim(),
+      alamat_aw: form.ahliWarisAlamat.trim(),
+      jalan_aw: form.jalan.trim(),
+      lat_aw: Number(form.lat),
+      lng_aw: Number(form.lng),
+      jumlah_santunan: Number(String(form.santunan).replace(/[^\d]/g, "")),
     };
-    persist([newRow, ...rows]);
-    setOpenModal(false);
+
+    try {
+      if (editingId) {
+        const { error } = await supabase
+          .from("data_waris")
+          .update(payload)
+          .eq("id", editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("data_waris").insert([payload]);
+        if (error) throw error;
+      }
+
+      setOpenModal(false);
+      await fetcherWaris();
+    } catch (err) {
+      console.error("❌ submitForm gagal:", err);
+      alert("Gagal menyimpan data.");
+    }
   };
 
-  const onDelete = (id) => {
+  const onDelete = async (id) => {
     if (!confirm("Hapus data ini?")) return;
-    persist(rows.filter((r) => r.id !== id));
-  };
-
-  const onResetDummy = () => {
-    if (!confirm("Reset ke 20 data dummy?")) return;
-    persist(DUMMY20);
-    setPage(1);
+    try {
+      const { error } = await supabase.from("data_waris").delete().eq("id", id);
+      if (error) throw error;
+      await fetcherWaris();
+    } catch (err) {
+      console.error("❌ delete gagal:", err);
+      alert("Gagal hapus data.");
+    }
   };
 
   return (
@@ -423,7 +411,13 @@ export default function DataAhliWaris() {
           <h1>Data Ahli Waris</h1>
           <span className="df-ribbon">🎀</span>
         </div>
-        <p className="df-sub">Semua grafik di bawah akan mengikuti data yang tampil pada tabel.</p>
+        <p className="df-sub">
+          Semua grafik ngikutin data tabel (hasil search + sort).
+        </p>
+        <p className="muted small" style={{ marginTop: 4 }}>
+          {loading ? "Memuat…" : `${filtered.length} baris ditampilkan`}
+          {loadedAt ? ` • diperbarui ${loadedAt.toLocaleTimeString("id-ID")}` : ""}
+        </p>
       </div>
 
       {/* Toolbar */}
@@ -461,8 +455,8 @@ export default function DataAhliWaris() {
           <button className="df-btn df-primary" onClick={openAdd}>
             ➕ Tambah Data
           </button>
-          <button className="df-btn" onClick={onResetDummy}>
-            🔁 Reset Dummy
+          <button className="df-btn" onClick={refresh} disabled={loading}>
+            🔄 Refresh
           </button>
         </div>
       </div>
@@ -473,7 +467,6 @@ export default function DataAhliWaris() {
           <thead>
             <tr>
               <th>No</th>
-              <th>Foto</th>
               <th>Nama Korban</th>
               <th>Gender</th>
               <th>Ahli Waris</th>
@@ -485,9 +478,15 @@ export default function DataAhliWaris() {
             </tr>
           </thead>
           <tbody>
-            {paged.length === 0 ? (
+            {loading ? (
               <tr>
-                <td colSpan={10} className="df-empty">
+                <td colSpan={9} className="df-empty">
+                  Loading data...
+                </td>
+              </tr>
+            ) : paged.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="df-empty">
                   <div className="df-empty-emoji">🫥</div>
                   Tidak ada data.
                 </td>
@@ -496,13 +495,6 @@ export default function DataAhliWaris() {
               paged.map((r, i) => (
                 <tr key={r.id}>
                   <td>{(page - 1) * pageSize + i + 1}</td>
-                  <td>
-                    <img
-                      src={r.korbanFoto}
-                      alt={r.korbanNama}
-                      style={{ width: 60, height: 48, objectFit: "cover", borderRadius: 8 }}
-                    />
-                  </td>
                   <td>{r.korbanNama}</td>
                   <td>{r.gender === "L" ? "Laki-laki" : "Perempuan"}</td>
                   <td>{r.ahliWarisNama}</td>
@@ -515,7 +507,10 @@ export default function DataAhliWaris() {
                       <button className="df-btn" onClick={() => openEdit(r)}>
                         ✏️ Edit
                       </button>
-                      <button className="df-btn df-danger" onClick={() => onDelete(r.id)}>
+                      <button
+                        className="df-btn df-danger"
+                        onClick={() => onDelete(r.id)}
+                      >
                         🗑️ Hapus
                       </button>
                     </div>
@@ -530,10 +525,18 @@ export default function DataAhliWaris() {
         <div className="table-footer">
           <div />
           <div className="pagination">
-            <button className="pager" disabled={page <= 1} onClick={() => setPage(1)}>
+            <button
+              className="pager"
+              disabled={page <= 1}
+              onClick={() => setPage(1)}
+            >
               «
             </button>
-            <button className="pager" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            <button
+              className="pager"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
               ‹
             </button>
             <span className="pager active">{page}</span>
@@ -556,8 +559,15 @@ export default function DataAhliWaris() {
         </div>
       </div>
 
-      {/* CHARTS – mengikuti "paged" */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 12 }}>
+      {/* CHARTS */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 12,
+          marginTop: 12,
+        }}
+      >
         <MiniBar title="Santunan / Bulan" data={barSantunan} />
         <MiniBar title="Jumlah Korban / Bulan" data={barKorban} />
         <MiniBar title="Rata-rata Santunan / Bulan" data={barRata} />
@@ -573,12 +583,20 @@ export default function DataAhliWaris() {
           background: "#fff",
         }}
       >
-        <div style={{ fontWeight: 800, marginBottom: 10 }}>Santunan Berdasarkan Usia & Jenis Kelamin</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          <Donut value={donutData.p} color="#ef4f65" label="Perempuan" />
-          <Donut value={donutData.l} color="#60a5fa" label="Laki-laki" />
-          <Donut value={donutData.u17} color="#f4c20d" label="0 – 17 tahun" />
-          <Donut value={donutData.a18} color="#d9a7ea" label="18 tahun ke atas" />
+        <div style={{ fontWeight: 800, marginBottom: 10 }}>
+          Proporsi Gender & Santunan
+        </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 10,
+          }}
+        >
+          <Donut value={donutData.korbanP} color="#ef4f65" label="Korban Perempuan" />
+          <Donut value={donutData.korbanL} color="#60a5fa" label="Korban Laki-laki" />
+          <Donut value={donutData.santP} color="#f4c20d" label="Santunan utk P" />
+          <Donut value={donutData.santL} color="#d9a7ea" label="Santunan utk L" />
         </div>
       </div>
 
@@ -589,7 +607,10 @@ export default function DataAhliWaris() {
         title={editingId ? "Edit Data Ahli Waris" : "Tambah Data"}
         footer={
           <>
-            <button className="btn-ghost" onClick={() => setOpenModal(false)}>
+            <button
+              className="btn-ghost"
+              onClick={() => setOpenModal(false)}
+            >
               Batal
             </button>
             <button className="btn-primary" onClick={submitForm}>
@@ -598,71 +619,52 @@ export default function DataAhliWaris() {
           </>
         }
       >
-        <div className="grid-form" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div
+          className="grid-form"
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}
+        >
           <div className="field">
             <label>Nama Korban *</label>
             <input
               value={form.korbanNama}
-              onChange={(e) => setForm((f) => ({ ...f, korbanNama: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, korbanNama: e.target.value }))
+              }
               placeholder="mis. Dewi Kartika"
             />
           </div>
+
           <div className="field">
             <label>Gender *</label>
             <select
               value={form.gender}
-              onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, gender: e.target.value }))
+              }
             >
               <option value="L">Laki-laki</option>
               <option value="P">Perempuan</option>
             </select>
           </div>
 
-          <div className="field" style={{ gridColumn: "1 / -1" }}>
-            <label>URL Foto (opsional)</label>
-            <input
-              value={form.fotoUrl}
-              onChange={(e) => setForm((f) => ({ ...f, fotoUrl: e.target.value }))}
-              placeholder="https://…"
-            />
-          </div>
-
-          <div className="field" style={{ gridColumn: "1 / -1" }}>
-            <label>Upload Foto (opsional)</label>
-            <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile} />
-            {(preview || form.fotoUrl) && (
-              <div style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center" }}>
-                <img
-                  src={preview || form.fotoUrl}
-                  alt="preview"
-                  style={{
-                    width: 120,
-                    height: 90,
-                    objectFit: "cover",
-                    borderRadius: 8,
-                    border: "1px solid #f0c9cf",
-                  }}
-                />
-                <span className="muted" style={{ fontSize: 12 }}>
-                  Pratinjau gambar
-                </span>
-              </div>
-            )}
-          </div>
-
           <div className="field">
             <label>Nama Ahli Waris *</label>
             <input
               value={form.ahliWarisNama}
-              onChange={(e) => setForm((f) => ({ ...f, ahliWarisNama: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, ahliWarisNama: e.target.value }))
+              }
               placeholder="mis. Rudi Hartono"
             />
           </div>
+
           <div className="field">
             <label>Alamat Ahli Waris *</label>
             <input
               value={form.ahliWarisAlamat}
-              onChange={(e) => setForm((f) => ({ ...f, ahliWarisAlamat: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, ahliWarisAlamat: e.target.value }))
+              }
               placeholder="Kecamatan, Kota"
             />
           </div>
@@ -671,7 +673,9 @@ export default function DataAhliWaris() {
             <label>Jalan / Lokasi *</label>
             <input
               value={form.jalan}
-              onChange={(e) => setForm((f) => ({ ...f, jalan: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, jalan: e.target.value }))
+              }
               placeholder="mis. Jl. HR Soebrantas, Bukit Raya"
             />
           </div>
@@ -680,15 +684,20 @@ export default function DataAhliWaris() {
             <label>Latitude *</label>
             <input
               value={form.lat}
-              onChange={(e) => setForm((f) => ({ ...f, lat: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, lat: e.target.value }))
+              }
               placeholder="0.5073"
             />
           </div>
+
           <div className="field">
             <label>Longitude *</label>
             <input
               value={form.lng}
-              onChange={(e) => setForm((f) => ({ ...f, lng: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, lng: e.target.value }))
+              }
               placeholder="101.4477"
             />
           </div>
@@ -698,13 +707,49 @@ export default function DataAhliWaris() {
             <input
               value={form.santunan}
               onChange={(e) =>
-                setForm((f) => ({ ...f, santunan: e.target.value.replace(/[^\d]/g, "") }))
+                setForm((f) => ({
+                  ...f,
+                  santunan: e.target.value.replace(/[^\d]/g, ""),
+                }))
               }
               placeholder="20000000"
             />
           </div>
         </div>
       </Modal>
+      {toast && (
+        <div
+          className={`toast ${toast.type}`}
+          onAnimationEnd={() => setToast(null)}
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            background: toast.type === "error" ? "#ffe5e5" : "#e8fff0",
+            color: toast.type === "error" ? "#a30f2d" : "#0f7a4c",
+            border: "1px solid",
+            borderColor: toast.type === "error" ? "#ffb8b8" : "#bfead5",
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontWeight: 600,
+            boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+            animation: "toastHide 2.2s ease forwards",
+            zIndex: 9999,
+          }}
+        >
+          {toast.msg}
+        </div>
+      )}
+
+      {/* ✅ KEYFRAMES taruh barengan sama toast */}
+      <style>{`
+        @keyframes toastHide {
+          0% { opacity: 0; transform: translateY(8px); }
+          10% { opacity: 1; transform: translateY(0); }
+          85% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(8px); }
+        }
+      `}</style>
     </div>
   );
 }

@@ -1,117 +1,461 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import * as pdfjsLib from "pdfjs-dist/build/pdf";
 import { supabase } from "../../lib/supabaseClient";
 import { toast } from "react-hot-toast";
-import * as pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs";
 
-// Map jenis dokumen ke folder
+// ===============================
+// MAP jenis dokumen -> folder
+// ===============================
 const DOKUMEN_FOLDER_MAP = {
-  ktp: 'ktp',
-  kk: 'kk', 
-  bukuTabungan: 'buku-tabungan',
-  formPengajuan: 'form-pengajuan',
-  formKeteranganAW: 'form-ahli-waris',
-  skKematian: 'surat-kematian',
-  aktaKelahiran: 'akta-kelahiran'
-  // fotoSurvey & ttdPetugas TIDAK DIMASUKKAN biar gak ganggu function lama
+  ktp: "ktp",
+  kk: "kk",
+  bukuTabungan: "buku-tabungan",
+  formPengajuan: "form-pengajuan",
+  formKeteranganAW: "form-ahli-waris",
+  skKematian: "surat-kematian",
+  aktaKelahiran: "akta-kelahiran",
 };
 
-// Function upload dokumen KTP, KK, dll
+// ===============================
+// HELPER: upload dokumen khusus
+// (KTP/KK/dll) ke folder terpisah
+// ===============================
 async function uploadDokumenKhusus(file, jenisDokumen, recordId) {
+  const recordIdFolder = recordId || Date.now();
+
   try {
-    // Generate unique filename
     const timestamp = Date.now();
     const randomStr = Math.random().toString(36).substring(2, 8);
-    const fileExt = file.name.split('.').pop();
+    const fileExt = file.name.split(".").pop();
     const fileName = `${timestamp}_${randomStr}_${jenisDokumen}.${fileExt}`;
-    
-    // Dapatkan folder dari map
+
     const folder = DOKUMEN_FOLDER_MAP[jenisDokumen];
-    if (!folder) {
-      throw new Error(`Jenis dokumen tidak valid: ${jenisDokumen}`);
-    }
-    
-    const path = `${folder}/${fileName}`;
-    
+    if (!folder) throw new Error(`Jenis dokumen tidak valid: ${jenisDokumen}`);
+
+    const path = `${folder}/${recordIdFolder}/${fileName}`;
     console.log(`📤 Uploading ${jenisDokumen} ke ${path}...`);
-    
-    // Upload ke Supabase
-    const { data, error } = await supabase.storage
-      .from('foto-survey')
-      .upload(path, file);
-    
-    if (error) {
-      console.error(`❌ Upload gagal untuk ${jenisDokumen}:`, error);
-      throw error;
-    }
-    
-    // Generate public URL
-    const { data: urlData } = supabase.storage
-      .from('foto-survey')
-      .getPublicUrl(path);
-    
+
+    const { error } = await supabase.storage.from("foto-survey").upload(path, file);
+    if (error) throw error;
+
+    const { data: urlData } = supabase.storage.from("foto-survey").getPublicUrl(path);
+
     const result = {
-      fileName: fileName,
-      path: path,
+      fileName,
+      path,
       url: urlData.publicUrl,
       jenis: jenisDokumen,
-      folder: folder,
+      folder,
       uploadedAt: new Date().toISOString(),
       size: file.size,
-      type: file.type
+      type: file.type,
     };
-    
+
     console.log(`✅ ${jenisDokumen} berhasil diupload:`, result.url);
     return result;
-    
   } catch (error) {
     console.error(`❌ Error upload ${jenisDokumen}:`, error);
     throw error;
   }
 }
 
-// Upload semua dokumen KTP, KK, dll dari form
+// ===============================
+// HELPER: upload semua dokumen
+// dari attachSurvey
+// ===============================
 async function uploadSemuaDokumen(formData, recordId) {
-  const results = {
-    success: [],
-    failed: []
-  };
-  
-  console.log('📦 Processing dokumen untuk upload:', Object.keys(formData));
-  
-  // Upload setiap dokumen yang ada
-  for (const [jenisDokumen, file] of Object.entries(formData)) {
-    // Hanya proses dokumen yang ada di DOKUMEN_FOLDER_MAP
+  const results = { success: [], failed: [] };
+
+  console.log("📦 Processing dokumen untuk upload:", Object.keys(formData || {}));
+
+  for (const [jenisDokumen, file] of Object.entries(formData || {})) {
     if (file && DOKUMEN_FOLDER_MAP[jenisDokumen]) {
       try {
         console.log(`🔄 Processing ${jenisDokumen}...`);
         const result = await uploadDokumenKhusus(file, jenisDokumen, recordId);
-        results.success.push({
-          jenis: jenisDokumen,
-          data: result
-        });
-        console.log(`✅ ${jenisDokumen} berhasil diupload`);
+        results.success.push({ jenis: jenisDokumen, data: result });
       } catch (error) {
-        results.failed.push({
-          jenis: jenisDokumen,
-          error: error.message
-        });
-        console.log(`❌ ${jenisDokumen} gagal:`, error.message);
+        results.failed.push({ jenis: jenisDokumen, error: error.message });
       }
-    } else {
-      console.log(`⏭️ Skip ${jenisDokumen} - bukan dokumen target`);
     }
   }
-  
-  console.log('📊 Upload Summary:', {
+
+  console.log("📊 Upload Summary:", {
     success: results.success.length,
     failed: results.failed.length,
-    totalProcessed: results.success.length + results.failed.length
+    totalProcessed: results.success.length + results.failed.length,
   });
-  
+
   return results;
 }
 
+// ===============================
+// HELPER: normalisasi file -> dataURL/url
+// support File | {file} | {dataURL} | {url} | string
+// ===============================
+const toDataURL = (file) =>
+  new Promise((resolve) => {
+    if (!file) return resolve("");
+    if (typeof file === "string") return resolve(file);
+    if (file.dataURL) return resolve(file.dataURL);
+    if (file.url) return resolve(file.url);
+
+    const blob =
+      file instanceof Blob
+        ? file
+        : file.file instanceof Blob
+        ? file.file
+        : null;
+
+    if (!blob) return resolve("");
+
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result || "");
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(blob);
+  });
+
+// ===============================
+// HELPER: upload foto (satu item)
+// ke bucket foto-survey
+// ===============================
+async function uploadFotoToStorage(
+  supabaseClient,
+  fileOrDataUrl,
+  folder = "survey-images",
+  recordId
+) {
+  const BUCKET_NAME = "foto-survey";
+  const recordIdFolder = recordId || Date.now();
+
+  // kalau sudah URL https langsung return stringnya
+  if (typeof fileOrDataUrl === "string" && /^https?:\/\//.test(fileOrDataUrl)) {
+    return fileOrDataUrl;
+  }
+
+  let body;
+  let contentType = "application/octet-stream";
+  let ext = "bin";
+  let originalName = "file";
+
+  // Data URL
+  if (typeof fileOrDataUrl === "string" && fileOrDataUrl.startsWith("data:")) {
+    const [header, base64] = fileOrDataUrl.split(",");
+    const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
+    contentType = mime;
+    ext = mime.split("/")[1] || "jpg";
+
+    const binary =
+      typeof atob === "function"
+        ? atob(base64)
+        : Buffer.from(base64, "base64").toString("binary");
+
+    const len = binary.length;
+    const u8 = new Uint8Array(len);
+    for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
+    body = u8;
+
+    originalName = `foto_${Date.now()}.${ext}`;
+  }
+  // File object
+  else if (typeof File !== "undefined" && fileOrDataUrl instanceof File) {
+    body = fileOrDataUrl;
+    contentType = fileOrDataUrl.type || contentType;
+    originalName = fileOrDataUrl.name || originalName;
+    ext = (originalName.split(".").pop() || ext).toLowerCase();
+  }
+  // object {file: File}
+  else if (
+    fileOrDataUrl?.file &&
+    typeof File !== "undefined" &&
+    fileOrDataUrl.file instanceof File
+  ) {
+    const f = fileOrDataUrl.file;
+    body = f;
+    contentType = f.type || contentType;
+    originalName = f.name || fileOrDataUrl.name || originalName;
+    ext = (originalName.split(".").pop() || ext).toLowerCase();
+  }
+  // object {dataURL: string}
+  else if (fileOrDataUrl?.dataURL && typeof fileOrDataUrl.dataURL === "string") {
+    return uploadFotoToStorage(supabaseClient, fileOrDataUrl.dataURL, folder, recordId);
+  } else {
+    console.warn("Format foto tidak dikenal:", fileOrDataUrl);
+    return null;
+  }
+
+  const safeFolder = folder.replace(/^\/+|\/+$/g, "");
+  const timestamp = Date.now();
+  const randomId = Math.random().toString(36).slice(2, 9);
+  const safeName = originalName.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const baseName = `${recordIdFolder}_${timestamp}_${randomId}_${safeName}`;
+
+  const filePath =
+    safeFolder === "survey-images"
+      ? `${safeFolder}/${baseName}`
+      : `${safeFolder}/${recordIdFolder}/${baseName}`;
+
+  console.log(`📤 Uploading to: ${filePath}, type: ${contentType}`);
+
+  const { error: uploadError } = await supabaseClient.storage
+    .from(BUCKET_NAME)
+    .upload(filePath, body, {
+      contentType,
+      upsert: false,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data: pubData } = supabaseClient.storage
+    .from(BUCKET_NAME)
+    .getPublicUrl(filePath);
+
+  if (!pubData?.publicUrl) throw new Error("Failed to get public URL");
+
+  return {
+    url: pubData.publicUrl,
+    path: filePath,
+    name: originalName,
+    fileName: `${timestamp}_${randomId}_${safeName}`,
+    uploadedAt: new Date().toISOString(),
+    size: body.size || body.length || 0,
+    type: contentType,
+  };
+}
+
+// ===============================
+// HELPER: PDF -> images (dataURL)
+// ===============================
+async function pdfToImages(file) {
+  const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
+  const images = [];
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({ scale: 2 });
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    images.push(canvas.toDataURL("image/png"));
+  }
+
+  return images;
+}
+
+// ===============================
+// UPLOAD: TTD Petugas
+// ===============================
+async function uploadTTDPetugas(ttdFile) {
+  try {
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    const finalFileName = `${timestamp}_${randomStr}.png`;
+    const filePath = `ttd-petugas/${finalFileName}`;
+
+    const { error } = await supabase.storage.from("foto-survey").upload(filePath, ttdFile);
+    if (error) throw error;
+
+    const { data: urlData } = supabase.storage.from("foto-survey").getPublicUrl(filePath);
+    return urlData.publicUrl;
+  } catch (error) {
+    console.error("❌ Error upload TTD:", error);
+    return null;
+  }
+}
+
+// ===============================
+// UPLOAD: Foto Survey umum
+// (survey-images / folder lain)
+// ===============================
+async function uploadFotoSurvey(files, folder = "survey-images", recordId) {
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  const recordIdFolder = recordId || Date.now();
+  console.log(`📤 Starting upload of ${files.length} files to ${folder}...`);
+
+  const uploadPromises = files.map(async (fileItem, index) => {
+    try {
+      let fileToUpload;
+      let fileName;
+      let label = fileItem?.label || "Foto Survey";
+      let type = fileItem?.type || "foto";
+
+      if (fileItem instanceof File) {
+        fileToUpload = fileItem;
+        fileName = fileItem.name;
+      } else if (fileItem?.file instanceof File) {
+        fileToUpload = fileItem.file;
+        fileName = fileItem.name || fileItem.file.name;
+      } else if (fileItem?.url?.startsWith("blob:")) {
+        const response = await fetch(fileItem.url);
+        const blob = await response.blob();
+        fileToUpload = new File([blob], fileItem.name || `foto_${Date.now()}.png`, {
+          type: blob.type || "image/png",
+        });
+        fileName = fileToUpload.name;
+      } else if (fileItem?.url?.startsWith("http")) {
+        // sudah uploaded
+        return fileItem;
+      } else {
+        return null;
+      }
+
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const uniqueFileName = `${recordIdFolder}_${timestamp}_${randomStr}_${fileName}`;
+
+      const filePath =
+        folder === "survey-images"
+          ? `${folder}/${uniqueFileName}`
+          : `${folder}/${recordIdFolder}/${uniqueFileName}`;
+
+      console.log(`📤 Uploading ${index + 1}/${files.length}: ${label} - ${uniqueFileName}`);
+
+      const { error } = await supabase.storage
+        .from("foto-survey")
+        .upload(filePath, fileToUpload, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (error) return null;
+
+      const { data: urlData } = supabase.storage.from("foto-survey").getPublicUrl(filePath);
+
+      return {
+        name: fileName,
+        fileName: uniqueFileName,
+        path: filePath,
+        url: urlData.publicUrl,
+        size: fileToUpload.size,
+        type: fileToUpload.type,
+        label,
+        category: type,
+        uploadedAt: new Date().toISOString(),
+        sumberIndex: fileItem?.sumberIndex,
+        fotoIndex: fileItem?.fotoIndex,
+        folder,
+      };
+    } catch (error) {
+      console.error(`❌ Error uploading file ${index}:`, error);
+      return null;
+    }
+  });
+
+  const results = await Promise.all(uploadPromises);
+  return results.filter(Boolean);
+}
+
+// ===============================
+// UPLOAD: Foto Sumber Informasi
+// (folder: sumber-informasi)
+// ===============================
+async function uploadSumberInformasi(files, recordId) {
+  if (!Array.isArray(files) || files.length === 0) return [];
+
+  console.log(`📤 Upload sumber info: ${files.length} files`);
+
+  const recordIdFolder = recordId || Date.now();
+
+  const uploadPromises = files.map(async (fileItem, index) => {
+    try {
+      let fileToUpload;
+      let fileName = fileItem?.name || `sumber_info_${Date.now()}.png`;
+
+      if (fileItem?.file instanceof File) {
+        fileToUpload = fileItem.file;
+        fileName = fileItem?.name || fileItem.file.name;
+      } else if (fileItem?.dataURL?.startsWith("data:") || fileItem?.dataURL?.startsWith("blob:")) {
+        const response = await fetch(fileItem.dataURL);
+        const blob = await response.blob();
+        fileToUpload = new File([blob], fileName, { type: blob.type || "image/png" });
+      } else if (fileItem instanceof File) {
+        fileToUpload = fileItem;
+        fileName = fileItem.name;
+      } else if (typeof fileItem?.url === "string" && fileItem.url.startsWith("http")) {
+        // ✅ sudah URL publik
+        const hasImgExt = /\.(png|jpe?g|webp|gif)(\?|$)/i.test(fileItem.url);
+        if (hasImgExt) {
+          return {
+            ...fileItem,
+            url: fileItem.url,
+            folder: "sumber-informasi",
+            category: "sumber_info",
+            uploadedAt: fileItem.uploadedAt || new Date().toISOString(),
+          };
+        }
+ 
+        // ❗ URL lama tanpa ekstensi → fetch lalu reupload
+        const response = await fetch(fileItem.url);
+        const blob = await response.blob();
+        const mime = blob.type || "image/png";
+        const extFromMime = mime.split("/")[1] || "png";
+ 
+        fileName = fileItem?.name || `sumber_info_${Date.now()}.${extFromMime}`;
+        fileToUpload = new File([blob], fileName, { type: mime });
+      } else {
+        return null;
+      }
+
+      const timestamp = Date.now();
+      const randomStr = Math.random().toString(36).substring(2, 8);
+      const hasExt = /\.[a-z0-9]{2,5}$/i.test(fileName);
+      let fileExt = hasExt ? fileName.split(".").pop().toLowerCase() : "";
+      if (!fileExt || fileExt === fileName.toLowerCase()) {
+        // ambil dari mime type kalau nama ga ada ext
+        const mimeExt = (fileToUpload.type || "").split("/")[1];
+        fileExt = (mimeExt || "png").toLowerCase();
+      }
+
+      const uniqueFileName = `sumber_${fileItem?.sumberIndex || 0}_foto_${
+        fileItem?.fotoIndex || 0
+      }_${timestamp}_${randomStr}.${fileExt}`;
+      const filePath = `sumber-informasi/${recordIdFolder}/${uniqueFileName}`;
+
+      const { error } = await supabase.storage.from("foto-survey").upload(
+        filePath,
+        fileToUpload,
+        {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: fileToUpload.type || "image/png",
+        }
+      );
+      if (error) return null;
+
+      const { data: urlData } = supabase.storage.from("foto-survey").getPublicUrl(filePath);
+
+      return {
+        name: fileName,
+        fileName: uniqueFileName,
+        path: filePath,
+        url: urlData.publicUrl,
+        size: fileToUpload.size,
+        type: fileToUpload.type,
+        label: fileItem?.label || "Sumber Informasi",
+        category: "sumber_info",
+        uploadedAt: new Date().toISOString(),
+        sumberIndex: fileItem?.sumberIndex,
+        fotoIndex: fileItem?.fotoIndex,
+        folder: "sumber-informasi",
+      };
+    } catch (error) {
+      console.error(`❌ Error uploading sumber info ${index}:`, error);
+      return null;
+    }
+  });
+
+  const results = await Promise.all(uploadPromises);
+  return results.filter(Boolean);
+}
+
+// ===============================
+// MAIN COMPONENT
+// ===============================
 export default function Step4({ data, setData, back, next }) {
   const [att, setAtt] = useState(data.attachSurvey || {});
   const [surveyStatus, setSurveyStatus] = useState([]);
@@ -124,6 +468,32 @@ export default function Step4({ data, setData, back, next }) {
     uraian: "❌ Belum isi",
     rekomendasi: "❌ Belum isi",
   });
+
+  // ===============================
+  // ✅ RECORD ID STABIL (1 SESSION = 1 ID)
+  // ===============================
+  const recordIdRef = useRef(
+    data.id ||
+      data.localId ||
+      `rec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  );
+
+  // simpan balik ke global biar langkah lain ikut stabil
+  useEffect(() => {
+    if (!data.id && !data.localId) {
+      setData((prev) => ({ ...prev, localId: recordIdRef.current }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ===============================
+  // ✅ GUARD BIAR SAVE CUMA SEKALI
+  // ===============================
+  const hasAutoSavedRef = useRef(false); // untuk autosave ML
+  const isSavingRef = useRef(false); // lock saving (auto/manual)
+  const hasManualSavedRef = useRef(false); // mencegah klik berulang
+
+  // ===== status semua benar Kunjungan RS (ML)
   const semuaBenar =
     mlResult &&
     Object.values(mlResult).every(
@@ -132,24 +502,137 @@ export default function Step4({ data, setData, back, next }) {
         (typeof v === "string" && (v.includes("✔") || v.includes("✅")))
     );
 
-  useEffect(() => {
-      console.log("🔄 STEP4 - Data berubah:");
-      console.log("📸 attachSurvey:", data.attachSurvey);
-      console.log("📸 fotoSurvey:", data.attachSurvey?.fotoSurvey);
-  }, [data.attachSurvey]);
-
-  // 🧩 Sinkronisasi lampiran ke data global
+  // ===== sync att -> data global
   useEffect(() => {
     setData?.({ ...data, attachSurvey: att });
   }, [att]);
 
+  // ===== setup pdfjs worker (sekali)
   useEffect(() => {
-    console.log("Step4 data:", data);
-    console.log("🔍 Data dikirim ke checkForm:", data);
-    checkForm(data);
-  }, [data]);
+    pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+      "pdfjs-dist/build/pdf.worker.min.mjs",
+      import.meta.url
+    ).toString();
+  }, []);
 
-  // 🧠 Logika utama penentuan status survey / ML
+  // ===============================
+  // VALIDATOR KUNJUNGAN RS (ML)
+  // ===============================
+  const checkForm = useCallback(
+    async (rawData) => {
+      const result = {};
+      const getVal = (v) => (typeof v === "string" ? v.trim() : v ?? "");
+
+      const val = {
+        foto: getVal(rawData.fotoSurveyList?.[0]),
+        korban: getVal(rawData.korban),
+        lokasi: getVal(rawData.lokasiKecelakaan),
+        rumahSakit: getVal(rawData.rumahSakit),
+        uraian: getVal(rawData.uraianKunjungan),
+        rekomendasi: getVal(rawData.rekomendasi),
+      };
+
+      const isNonsense = (text) => {
+        if (!text) return true;
+        const lower = text.toLowerCase();
+        if (/(.)\1{4,}/.test(lower)) return true;
+        if (!lower.includes(" ") && lower.length > 25) return true;
+
+        const vowels = (lower.match(/[aiueo]/g) || []).length;
+        if (vowels / lower.length < 0.3) return true;
+
+        const commonWords = ["dan", "di", "ke", "yang", "untuk", "dengan", "karena"];
+        const hasCommon = commonWords.some((w) => lower.includes(w));
+        if (!hasCommon && lower.split(" ").length < 3) return true;
+
+        return false;
+      };
+
+      const validLokasi = (text) => {
+        if (!text) return false;
+        const words = text.trim().split(/\s+/);
+        if (words.length < 3) return false;
+        return /(jalan|jl\.|dekat|simpang|gedung|rumah|desa|kelurahan|kecamatan)/i.test(
+          text
+        );
+      };
+
+      // FOTO
+      if (!val.foto) result.foto = "❌ Belum unggah";
+      else if (
+        ["clear", "baik", "jelas"].includes((rawData.fotoQuality || "").toLowerCase())
+      )
+        result.foto = "✅ Foto jelas";
+      else result.foto = "✅ Foto terlihat";
+
+      // KORBAN
+      if (!val.korban) result.korban = "❌ Belum isi";
+      else if (/\b(dr|mr|mrs|ir|s\.t|s\.kom)\b/i.test(val.korban))
+        result.korban = "❌ Nama korban tidak boleh ada gelar";
+      else result.korban = "✅ Nama korban sesuai ketentuan";
+
+      // LOKASI
+      if (!val.lokasi) result.lokasi = "❌ Belum isi";
+      else if (!validLokasi(val.lokasi))
+        result.lokasi =
+          "❌ Lokasi belum cukup detail (tambah nama jalan/area/lokasi terdekat)";
+      else result.lokasi = "✅ Lokasi lengkap";
+
+      // RS
+      if (!val.rumahSakit) result.rumahSakit = "❌ Belum isi";
+      else if (val.rumahSakit !== val.rumahSakit.toUpperCase())
+        result.rumahSakit = "❌ Nama RS tidak kapital semua";
+      else result.rumahSakit = "✅ Nama RS kapital semua";
+
+      // URAIAN
+      if (!val.uraian) result.uraian = "❌ Belum isi";
+      else if (val.uraian.length < 20) result.uraian = "❌ Uraian terlalu singkat";
+      else if (isNonsense(val.uraian)) result.uraian = "❌ Uraian tidak bermakna";
+      else if (val.uraian.includes("sesuai ketentuan"))
+        result.uraian = "✅ Uraian sesuai ketentuan";
+      else result.uraian = "✅ Uraian deskriptif";
+
+      // REKOMENDASI
+      if (!val.rekomendasi) result.rekomendasi = "❌ Belum isi";
+      else if (val.rekomendasi.length < 15)
+        result.rekomendasi = "❌ Rekomendasi terlalu pendek";
+      else if (isNonsense(val.rekomendasi))
+        result.rekomendasi = "❌ Rekomendasi tidak bermakna";
+      else if (val.rekomendasi.includes("direkomendasikan"))
+        result.rekomendasi = "✅ Rekomendasi sesuai ketentuan";
+      else result.rekomendasi = "✅ Rekomendasi jelas";
+
+      setMlResult(result);
+      setData((prev) => ({ ...prev, mlResult: result }));
+
+      // ✅ AUTO SAVE CUMA SEKALI
+      const allValid = Object.values(result).every((v) => String(v).startsWith("✅"));
+      if (
+        allValid &&
+        !hasAutoSavedRef.current &&
+        !isSavingRef.current &&
+        !rawData.formSavedId
+      ) {
+        isSavingRef.current = true;
+        try {
+          const savedId = await saveKunjunganToSupabase(rawData, recordIdRef.current);
+          if (savedId) {
+            hasAutoSavedRef.current = true;
+            setData((prev) => ({ ...prev, formSavedId: savedId }));
+          }
+        } finally {
+          isSavingRef.current = false;
+        }
+      }
+
+      return result;
+    },
+    [setData]
+  );
+
+  // ===============================
+  // Tentukan status Survey / ML
+  // ===============================
   useEffect(() => {
     if (!data) return;
 
@@ -161,18 +644,18 @@ export default function Step4({ data, setData, back, next }) {
         setSurveyStatus(surveyMDComplete(data));
       }
     } else {
-      const result = checkForm(data);
-      setMlResult(result);
+      checkForm(data);
     }
-  }, [data]);
+  }, [data, checkForm]);
 
-  // 1) status LL berdasar surveyStatus
+  // ===============================
+  // Status dokumen survey
+  // ===============================
   const dokumenOkLL =
     Array.isArray(surveyStatus) &&
     surveyStatus.length > 0 &&
     surveyStatus.every((x) => String(x.status).startsWith("✅"));
 
-  // 2) status MD berdasar surveyStatus (kamu filter foto kalau mau)
   const dokumenOkMD =
     Array.isArray(surveyStatus) &&
     surveyStatus.length > 0 &&
@@ -184,248 +667,694 @@ export default function Step4({ data, setData, back, next }) {
           (x.status.includes("✔") || x.status.includes("✅"))
       );
 
-  // 3) flag umum untuk render tombol/pesan
   const dokumenOk =
     data.isSurvey &&
-    (
-      (data.sifatCidera?.toUpperCase() === "MD" && dokumenOkMD) ||
-      ((data.sifatCidera?.toUpperCase() === "LL" || data.sifatCidera?.toUpperCase() === "LUKA-LUKA") && dokumenOkLL)
+    ((data.sifatCidera?.toUpperCase() === "MD" && dokumenOkMD) ||
+      ((data.sifatCidera?.toUpperCase() === "LL" ||
+        data.sifatCidera?.toUpperCase() === "LUKA-LUKA") &&
+        dokumenOkLL));
+
+  // ✅ UNIVERSAL VALID FLAG (Survey + RS)
+  const sedangAnalisis =
+    !data.isSurvey &&
+    mlResult &&
+    Object.values(mlResult).some(
+      (v) => typeof v === "string" && v.includes("Sedang dianalisis")
     );
 
-  async function uploadFotoToStorage(supabase, fileOrDataUrl, folder = "survey-images") {
-    const BUCKET_NAME = "foto-survey";
+  const validSemua = data.isSurvey ? dokumenOk : (semuaBenar && !sedangAnalisis);
 
-    // Jika sudah URL, langsung return
-    if (typeof fileOrDataUrl === "string" && /^https?:\/\//.test(fileOrDataUrl)) {
-        return fileOrDataUrl;
-    }
+  // ===============================
+  // SAVE KUNJUNGAN RS (✅ recordId stabil)
+  // ===============================
+  async function saveKunjunganToSupabase(rawData, recordIdFromRef) {
+    const recordId = rawData?.id || rawData?.localId || recordIdFromRef;
 
-    let body;
-    let contentType = "application/octet-stream";
-    let ext = "bin";
-    let originalName = "file";
+    try {
+      const fotoSurveyList = Array.isArray(rawData.fotoSurveyList)
+        ? rawData.fotoSurveyList
+        : [];
 
-    // Handle Data URL
-    if (typeof fileOrDataUrl === "string" && fileOrDataUrl.startsWith("data:")) {
-        const [header, base64] = fileOrDataUrl.split(",");
-        const mime = header.match(/data:(.*?);base64/)?.[1] || "image/jpeg";
-        contentType = mime;
-        ext = mime.split("/")[1] || "jpg";
-        const binary = typeof atob === "function" ? atob(base64) : Buffer.from(base64, "base64").toString("binary");
-        const len = binary.length;
-        const u8 = new Uint8Array(len);
-        for (let i = 0; i < len; i++) u8[i] = binary.charCodeAt(i);
-        body = u8;
-        originalName = `foto_${Date.now()}.${ext}`;
-    } 
-    // Handle File object langsung
-    else if (typeof File !== "undefined" && fileOrDataUrl instanceof File) {
-        body = fileOrDataUrl;
-        contentType = fileOrDataUrl.type || "application/octet-stream";
-        originalName = fileOrDataUrl.name || "file";
-        ext = (originalName.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
-    } 
-    // Handle object dengan property file
-    else if (fileOrDataUrl?.file && typeof File !== "undefined" && fileOrDataUrl.file instanceof File) {
-        const f = fileOrDataUrl.file;
-        body = f;
-        contentType = f.type || "application/octet-stream";
-        originalName = f.name || fileOrDataUrl.name || "file";
-        ext = (originalName.split(".").pop() || (contentType.split("/")[1] || "bin")).toLowerCase();
-    } 
-    // Handle object dengan dataURL
-    else if (fileOrDataUrl?.dataURL && typeof fileOrDataUrl.dataURL === "string") {
-        return uploadFotoToStorage(supabase, fileOrDataUrl.dataURL, folder);
-    } else {
-        console.warn("Format foto tidak dikenal:", fileOrDataUrl);
+      const uploadedFotos = [];
+      for (const foto of fotoSurveyList) {
+        try {
+          const uploadResult = await uploadFotoToStorage(
+            supabase,
+            foto,
+            "survey-images",
+            recordId
+          );
+          if (uploadResult) uploadedFotos.push(uploadResult);
+        } catch (e) {
+          console.error("❌ gagal upload foto kunjungan:", e);
+        }
+      }
+
+      // Upload TTD jika dataURL
+      let ttdUrl = rawData.petugasTtd;
+      if (ttdUrl && typeof ttdUrl === "string" && ttdUrl.startsWith("data:")) {
+        try {
+          const ttdMeta = await uploadFotoToStorage(
+            supabase,
+            ttdUrl,
+            "ttd-petugas",
+            recordId
+          );
+          ttdUrl = ttdMeta?.url || ttdUrl;
+        } catch {}
+      }
+
+      const toIso = (v) => {
+        if (!v) return null;
+        if (v instanceof Date) return v.toISOString();
+        if (typeof v === "string") {
+          const parsed = new Date(v);
+          return isNaN(parsed.getTime()) ? v : parsed.toISOString();
+        }
         return null;
-    }
+      };
 
-    // Generate safe file path
-    const safeFolder = folder.replace(/^\/+|\/+$/g, "");
-    const timestamp = Date.now();
-    const randomId = Math.random().toString(36).slice(2, 9);
-    const safeName = originalName.replace(/[^a-zA-Z0-9.-]/g, "_");
-    const filePath = `${safeFolder}/${timestamp}_${randomId}_${safeName}`;
+      const payload = {
+        petugas: rawData.petugas?.trim() || null,
+        petugas_jabatan: rawData.petugasJabatan?.trim() || "Petugas Pelayanan",
+        wilayah: rawData.wilayah?.trim() || null,
+        korban: rawData.korban?.trim() || null,
+        rumah_sakit: rawData.rumahSakit?.trim() || null,
+        lokasi_kecelakaan: rawData.lokasiKecelakaan?.trim() || null,
+        tanggal_kecelakaan: toIso(rawData.tanggalKecelakaan),
+        tgl_masuk_rs: toIso(rawData.tglMasukRS),
+        tgl_jam_notifikasi: toIso(rawData.tglJamNotifikasi),
+        tgl_jam_kunjungan: toIso(rawData.tglJamKunjungan),
+        uraian: rawData.uraianKunjungan?.trim() || null,
+        rekomendasi: rawData.rekomendasi?.trim() || null,
+        petugas_ttd: ttdUrl || null,
+        foto_survey: uploadedFotos.length ? uploadedFotos : null,
+        created_at: new Date().toISOString(),
+        local_id: recordId,
+      };
 
-    try {
-        console.log(`📤 Uploading to: ${filePath}, type: ${contentType}`);
+      const { data: inserted, error } = await supabase
+        .from("form_kunjungan_rs")
+        .insert([payload])
+        .select()
+        .single();
 
-        const { data: uploadData, error: uploadError } = await supabase
-            .storage
-            .from(BUCKET_NAME)
-            .upload(filePath, body, { 
-                contentType,
-                upsert: false
-            });
+      if (error) throw error;
 
-        if (uploadError) {
-            console.error("❌ Upload error:", uploadError);
-            throw uploadError;
-        }
-
-        // Get public URL
-        const { data: pubData } = supabase.storage.from(BUCKET_NAME).getPublicUrl(filePath);
-        const publicUrl = pubData?.publicUrl;
-        
-        if (publicUrl) {
-            console.log("✅ Upload successful:", publicUrl);
-            return {
-                url: publicUrl,
-                path: filePath,
-                name: originalName,
-                fileName: `${timestamp}_${randomId}_${safeName}`,
-                uploadedAt: new Date().toISOString(),
-                size: body.size || body.length || 0,
-                type: contentType
-            };
-        }
-
-        throw new Error("Failed to get public URL");
-
-    } catch (error) {
-        console.error("❌ Upload failed:", error);
-        throw error;
-    }
-  }
-
-  // 🖨️ Fungsi Download / Cetak HTML (versi Kunjungan RS)
-  async function saveKunjunganToSupabase(data) {
-    try {
-        console.log("💾 Starting save process...", data);
-
-        // 1) Upload semua foto survey dengan error handling yang lebih baik
-        const fotoSurveyList = Array.isArray(data.fotoSurveyList) ? data.fotoSurveyList : [];
-        const uploadedFotos = [];
-
-        if (fotoSurveyList.length > 0) {
-            console.log(`📸 Processing ${fotoSurveyList.length} photos...`);
-            
-            for (const [index, foto] of fotoSurveyList.entries()) {
-                try {
-                    console.log(`🔄 Uploading photo ${index + 1}/${fotoSurveyList.length}:`, foto);
-                    
-                    const uploadResult = await uploadFotoToStorage(supabase, foto, "survey-images");
-                    
-                    if (uploadResult) {
-                        uploadedFotos.push(uploadResult);
-                        console.log(`✅ Photo ${index + 1} uploaded successfully`);
-                    } else {
-                        console.warn(`⚠️ Photo ${index + 1} upload returned null`);
-                    }
-                } catch (fotoError) {
-                    console.error(`❌ Failed to upload photo ${index + 1}:`, fotoError);
-                    // Continue dengan foto berikutnya meskipun satu gagal
-                    continue;
-                }
-            }
-        } else {
-            console.log("ℹ️ No photos to upload");
-        }
-
-        // 2) Upload TTD petugas
-        let ttdUrl = data.petugasTtd;
-        let ttdMetadata = null;
-        
-        if (ttdUrl && typeof ttdUrl === "string" && ttdUrl.startsWith("data:")) {
-            console.log("🖊️ Uploading TTD...");
-            try {
-                ttdMetadata = await uploadFotoToStorage(supabase, ttdUrl, "ttd-petugas");
-                ttdUrl = ttdMetadata?.url || ttdUrl;
-                console.log("✅ TTD uploaded successfully");
-            } catch (ttdError) {
-                console.error("❌ TTD upload failed:", ttdError);
-                // Tetap lanjut tanpa TTD
-            }
-        }
-
-        // 3) Normalisasi tanggal
-        const toIso = (v) => {
-            if (!v) return null;
-            if (v instanceof Date) return v.toISOString();
-            if (typeof v === 'string') {
-                // Try to parse string to date
-                const parsed = new Date(v);
-                return isNaN(parsed.getTime()) ? v : parsed.toISOString();
-            }
-            return null;
-        };
-
-        // 4) Prepare payload dengan struktur yang konsisten
-        const payload = {
-            petugas: data.petugas?.trim() || null,
-            petugas_jabatan: data.petugasJabatan?.trim() || "Petugas Pelayanan",
-            wilayah: data.wilayah?.trim() || null,
-            korban: data.korban?.trim() || null,
-            rumah_sakit: data.rumahSakit?.trim() || null,
-            lokasi_kecelakaan: data.lokasiKecelakaan?.trim() || null,
-            tanggal_kecelakaan: toIso(data.tanggalKecelakaan),
-            tgl_masuk_rs: toIso(data.tglMasukRS),
-            tgl_jam_notifikasi: toIso(data.tglJamNotifikasi),
-            tgl_jam_kunjungan: toIso(data.tglJamKunjungan),
-            uraian: data.uraianKunjungan?.trim() || null,
-            rekomendasi: data.rekomendasi?.trim() || null,
-            petugas_ttd: ttdUrl || null,
-            foto_survey: uploadedFotos.length > 0 ? uploadedFotos : null,
-            created_at: new Date().toISOString()
-        };
-
-        console.log("📦 Payload untuk Supabase:", payload);
-
-        // 5) Insert ke database
-        const { data: inserted, error } = await supabase
-            .from("form_kunjungan_rs")
-            .insert([payload])
-            .select()
-            .single();
-
-        if (error) {
-            console.error("❌ Database error:", error);
-            throw error;
-        }
-
-        console.log("✅ Data saved successfully to Supabase:", inserted);
-        
-        // Show success summary
-        if (uploadedFotos.length > 0) {
-            console.log(`📊 Summary: ${uploadedFotos.length} photos uploaded successfully`);
-        }
-        
-        return inserted.id;
-
+      toast.success("✅ Data kunjungan RS tersimpan");
+      return inserted.id;
     } catch (err) {
-        console.error("❌ Gagal simpan ke Supabase:", err);
-        
-        // More user-friendly error message
-        let errorMessage = "Gagal menyimpan data";
-        if (err.message?.includes("network")) {
-            errorMessage += " - masalah koneksi jaringan";
-        } else if (err.message?.includes("storage")) {
-            errorMessage += " - masalah penyimpanan foto";
-        } else if (err.message?.includes("JWT")) {
-            errorMessage += " - masalah autentikasi";
-        } else {
-            errorMessage += `: ${err.message || err}`;
-        }
-        
-        toast.error(errorMessage);
-        return null;
+      console.error("❌ Gagal simpan kunjungan:", err);
+      toast.error(`Gagal menyimpan data kunjungan. ${err.message || err}`);
+      return null;
     }
   }
 
-  const openPrint = async () => {
+  // ===============================
+  // SAVE SURVEY (MD/LL) (✅ recordId stabil)
+  // ===============================
+  async function saveSurveyToSupabase(raw, recordIdFromRef) {
+    const recordId = raw.id || raw.localId || recordIdFromRef;
+
+    const toISODate = (d) => {
+      if (!d) return null;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(d))) return String(d);
+      const t = new Date(d);
+      return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10);
+    };
+
+    const sifat = String(raw.sifatCidera || "")
+      .toLowerCase()
+      .includes("md")
+      ? "meninggal"
+      : "luka";
+
+    const jenisSurvei =
+      typeof raw.jenisSurvei === "string"
+        ? raw.jenisSurvei.replace("keabsahan_waris", "keabsahan_ahli_waris")
+        : null;
+
+    // ===== upload TTD (attachSurvey lebih prioritas)
+    let petugasTtdUrl = null;
+
+    if (raw.attachSurvey?.petugasTtd) {
+      const ttdData = raw.attachSurvey.petugasTtd;
+
+      if (ttdData.file instanceof File) {
+        petugasTtdUrl = await uploadTTDPetugas(ttdData.file);
+      } else if (typeof ttdData.url === "string") {
+        petugasTtdUrl = ttdData.url;
+      } else if (typeof ttdData.dataURL === "string") {
+        const uploaded = await uploadFotoToStorage(
+          supabase,
+          ttdData.dataURL,
+          "ttd-petugas",
+          recordId
+        );
+        petugasTtdUrl = uploaded?.url || null;
+      }
+    } else if (raw.petugasTtd instanceof File) {
+      petugasTtdUrl = await uploadTTDPetugas(raw.petugasTtd);
+    } else if (typeof raw.petugasTtd === "string" && raw.petugasTtd.trim()) {
+      petugasTtdUrl = raw.petugasTtd.trim();
+    }
+
+    // ===== kumpulkan foto survey
+    const allFotoFiles = [];
+    if (Array.isArray(raw.attachSurvey?.fotoSurvey)) {
+      allFotoFiles.push(...raw.attachSurvey.fotoSurvey);
+    }
+    if (raw.attachSurvey?.mapSS) {
+      allFotoFiles.push({ ...raw.attachSurvey.mapSS, label: "Peta Lokasi", type: "map" });
+    }
+    if (raw.attachSurvey?.barcode) {
+      allFotoFiles.push({ ...raw.attachSurvey.barcode, label: "Barcode/QR", type: "barcode" });
+    }
+
+    // ===== kumpulkan foto sumber info
+    const allSumberInfoFiles = [];
+    if (Array.isArray(raw.sumbers)) {
+      raw.sumbers.forEach((sumber, index) => {
+        if (Array.isArray(sumber.foto)) {
+          sumber.foto.forEach((foto, fotoIndex) => {
+            const isValid =
+              (foto?.file instanceof File) ||
+              (foto?.dataURL &&
+                (foto.dataURL.startsWith("data:") || foto.dataURL.startsWith("blob:"))) ||
+              (foto?.url &&
+                (foto.url.startsWith("data:") ||
+                 foto.url.startsWith("blob:") ||
+                 foto.url.startsWith("http"))) ||
+              (typeof foto === "string" &&
+                (foto.startsWith("data:") ||
+                 foto.startsWith("blob:") ||
+                 foto.startsWith("http")));
+
+            if (!isValid) return;
+
+            allSumberInfoFiles.push({
+              ...(typeof foto === "string"
+                  ? (/^https?:\/\//.test(foto) ? { url: foto } : { dataURL: foto })
+                  : foto),
+              label: `Sumber ${index + 1} - ${sumber.identitas || "Unknown"}`,
+              type: "sumber_info",
+              sumberIndex: index,
+              fotoIndex,
+            });
+          });
+        }
+      });
+    }
+
+    // ===== upload dokumen wajib
+    await uploadSemuaDokumen(raw.attachSurvey || {}, recordId);
+
+    // ===== upload semua foto (folder stabil)
+    const uploadedAllFotos = await uploadFotoSurvey(allFotoFiles, "survey-images", recordId);
+    const uploadedSumberInfoFotos = await uploadSumberInformasi(allSumberInfoFiles, recordId);
+
+    const sumbersLite = Array.isArray(raw.sumbers)
+      ? raw.sumbers.map((r) => ({ identitas: r?.identitas || "" }))
+      : [];
+
+    const payload = {
+      no_pl: raw.noPL || null,
+      hari_tanggal: toISODate(raw.hariTanggal || raw.tanggalKecelakaan),
+      petugas: raw.petugas || raw.petugasSurvei || null,
+
+      jenis_survei: jenisSurvei,
+      jenis_lainnya: jenisSurvei ? null : raw.jenisSurveiLainnya || null,
+
+      nama_korban: raw.korban || raw.namaKorban || null,
+      no_berkas: raw.noBerkas || null,
+      alamat_korban: raw.alamatKorban || null,
+      tempat_kecelakaan: raw.tempatKecelakaan || raw.lokasiKecelakaan || null,
+      tanggal_kecelakaan: toISODate(raw.tanggalKecelakaan || raw.tglKecelakaan),
+      hubungan_sesuai:
+        typeof raw.hubunganSesuai === "boolean" ? raw.hubunganSesuai : null,
+
+      sifat,
+      uraian: raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
+      kesimpulan: raw.kesimpulanSurvei ?? null,
+      petugas_ttd: petugasTtdUrl,
+      foto_survey: uploadedAllFotos,
+
+      attachments: {
+        ktp: !!raw.attachSurvey?.ktp,
+        kk: !!raw.attachSurvey?.kk,
+        buku_tabungan: !!raw.attachSurvey?.bukuTabungan,
+        form_pengajuan_santunan: !!raw.attachSurvey?.formPengajuan,
+        form_keterangan_ahli_waris: !!raw.attachSurvey?.formKeteranganAW,
+        surat_keterangan_kematian: !!raw.attachSurvey?.skKematian,
+        akta_kelahiran: !!raw.attachSurvey?.aktaKelahiran,
+        map_ss: !!raw.attachSurvey?.mapSS,
+        barcode_qr: !!raw.attachSurvey?.barcode,
+        foto_survey_count: uploadedAllFotos.length,
+        sumber_info_count: uploadedSumberInfoFotos.length,
+      },
+
+      sumbers: sumbersLite,
+      local_id: recordId,
+    };
+
+    try {
+      const { data: inserted, error: insErr } = await supabase
+        .from("form_survei_aw")
+        .insert(payload, { returning: "representation" })
+        .select()
+        .single();
+
+      if (insErr) throw insErr;
+
+      const surveyId = inserted.id;
+
+      const sumbersWithUploadedFotos = (raw.sumbers || []).map((sumber, index) => {
+        const uploadedFotosForSumber = uploadedSumberInfoFotos.filter(
+          (f) => f.sumberIndex === index
+        );
+
+        return {
+          identitas: sumber.identitas || "",
+          foto: uploadedFotosForSumber.map((f) => ({
+            name: f.name,
+            fileName: f.fileName,
+            url: f.url,
+            uploadedAt: f.uploadedAt,
+          })),
+          foto_count: uploadedFotosForSumber.length,
+        };
+      });
+
+      const { error: updErr } = await supabase
+        .from("form_survei_aw")
+        .update({
+          sumbers: sumbersWithUploadedFotos,
+          sumbers_paths: uploadedSumberInfoFotos,
+        })
+        .eq("id", surveyId);
+
+      if (updErr) throw updErr;
+
+      toast.success("✅ Data survei tersimpan");
+      return {
+        id: surveyId,
+        fotoSurvey: uploadedAllFotos,
+        fotoSumberInfo: uploadedSumberInfoFotos,
+      };
+    } catch (err) {
+      console.error("❌ Gagal simpan survei:", err);
+      toast.error(`Gagal menyimpan survei. ${err.message || err}`);
+      return null;
+    }
+  }
+
+  // ===============================
+  // AUTO DRAFT WARIS kalau MD
+  // ===============================
+  async function createDraftWarisIfMD(savedSurvey, rawData) {
+    try {
+      const sifatTxt = String(rawData?.sifatCidera || "").toLowerCase();
+      const isMD = sifatTxt.includes("md") || sifatTxt.includes("meninggal");
+      if (!isMD) return;
+
+      const surveyId = savedSurvey?.id || savedSurvey;
+      if (!surveyId) return;
+
+      const namaKorban =
+        rawData.korban ||
+        rawData.namaKorban ||
+        rawData.korbanNama ||
+        rawData.v?.namaKorban ||
+        rawData.form?.namaKorban ||
+        rawData.survey?.namaKorban ||
+        null;
+
+      const alamatKorban =
+        rawData.alamatKorban ||
+        rawData.v?.alamatKorban ||
+        rawData.form?.alamatKorban ||
+        null;
+
+      const payloadWaris = {
+        survey_id: surveyId,
+        nama_korban: namaKorban,
+        alamat_korban: alamatKorban,
+        status: "draft",
+      };
+
+      const { error } = await supabase.from("data_waris").insert([payloadWaris]);
+      if (error) throw error;
+
+      console.log("✅ Draft data_waris dibuat otomatis:", payloadWaris);
+    } catch (err) {
+      console.error("❌ createDraftWarisIfMD error:", err);
+    }
+  }
+
+  // ===============================
+  // PREPARE OUTPUT untuk print
+  // ===============================
+  const prepareForOutput = useCallback(
+    async (rec) => {
+      const vv = { ...rec };
+
+      vv.petugas = rec.petugas || rec.petugasSurvei || "";
+      vv.petugasJabatan = rec.petugasJabatan || "";
+      vv.korban = rec.korban || rec.namaKorban || "";
+      vv.namaKorban = vv.korban;
+      vv.noPL = rec.noPL || rec.no_pl || "";
+      vv.noBerkas = rec.noBerkas || rec.no_berkas || "";
+      vv.alamatKorban = rec.alamatKorban || "";
+      vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
+      vv.wilayah = rec.wilayah || "";
+      vv.rumahSakit = rec.rumahSakit || "";
+
+      // TTD petugas
+      if (!vv.petugasTtd) {
+        const p = rec.attachSurvey?.petugasTtd;
+        if (p?.dataURL) vv.petugasTtd = p.dataURL;
+        else if (p?.url) vv.petugasTtd = p.url;
+        else if (p?.file instanceof Blob) vv.petugasTtd = await toDataURL(p.file);
+        else vv.petugasTtd = rec.petugasTtd || "";
+      }
+
+      vv.tglKecelakaan = rec.tglKecelakaan || rec.tanggalKecelakaan || "";
+      vv.hariTanggal =
+        rec.hariTanggal || rec.tanggalKecelakaan || vv.tglKecelakaan || "";
+      vv.tglMasukRS = rec.tglMasukRS || "";
+      vv.tglJamNotifikasi = rec.tglJamNotifikasi || "";
+      vv.tglJamKunjungan = rec.tglJamKunjungan || "";
+
+      const sc = (rec.sifatCidera || "").toLowerCase();
+      vv.jenisSurvei =
+        rec.jenisSurvei ||
+        (sc.includes("md")
+          ? "Meninggal Dunia"
+          : sc.includes("ll")
+          ? "Luka-luka"
+          : "");
+
+      let hs = rec.hubunganSesuai;
+      if (typeof hs === "string") {
+        const s = hs.trim().toLowerCase();
+        if (["ya", "y", "true", "1", "sesuai"].includes(s)) hs = true;
+        else if (
+          ["tidak", "tdk", "no", "n", "false", "0", "tidak sesuai"].includes(s)
+        )
+          hs = false;
+      }
+      vv.hubunganSesuai = hs ?? "";
+
+      vv.uraian =
+        (rec.uraianSurvei || rec.uraian || "") +
+        (rec.kesimpulanSurvei ? `\n\nKesimpulan: ${rec.kesimpulanSurvei}` : "");
+
+      if (!vv.uraian.trim() && rec.uraianKunjungan)
+        vv.uraian = rec.uraianKunjungan;
+
+      vv.uraianKunjungan = rec.uraianKunjungan || vv.uraian || "";
+      vv.rekomendasi = rec.rekomendasi || "";
+
+      const fotoCandidates = []
+        .concat(rec.attachSurvey?.fotoSurvey || [])
+        .concat(rec.fotoSurveyList || []);
+
+      const allPhotos = [];
+      for (const f of Array.isArray(fotoCandidates) ? fotoCandidates : [fotoCandidates]) {
+        if (!f) continue;
+        const name =
+          f.name ||
+          f.fileName ||
+          f.filename ||
+          f.label ||
+          (typeof f === "string" ? f.split("/").pop() : "foto");
+
+        const src = await toDataURL(f);
+        if (!src) continue;
+        if (/\.pdf(\?|$)/i.test(name) || src.startsWith("data:application/pdf")) continue;
+
+        allPhotos.push({ name, dataURL: src });
+      }
+
+      vv.allPhotos = allPhotos;
+      vv.attachSurvey = rec.attachSurvey || {};
+
+      return vv;
+    },
+    []
+  );
+
+  // ===============================
+  // BUILD HTML Survey Client
+  // ===============================
+  function buildSurveyHtmlClient(vv, { filePages = [], tableRows = "" } = {}) {
+    const escapeHtml = (str = "") =>
+      String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const fmtDate = (d) => {
+      if (!d) return "-";
+      try {
+        const date = new Date(d);
+        return date.toLocaleDateString("id-ID", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+        });
+      } catch {
+        return d;
+      }
+    };
+
+    const jenis = (vv.jenisSurvei || "").toLowerCase();
+    const isKetKorban = jenis.includes("keterjaminan");
+    const isKeabsWaris =
+      jenis.includes("ahli waris") || jenis.includes("keabsahan_ahli_waris");
+    const isKeabsBiaya = jenis.includes("biaya");
+
+    const lainnyaTxt =
+      !isKetKorban && !isKeabsWaris && !isKeabsBiaya
+        ? vv.jenisSurveiLainnya || vv.jenisSurvei || ""
+        : vv.jenisSurveiLainnya || "";
+
+    const chk = (on) => (on ? "☑" : "☐");
+    const petugasSrc = vv.petugasTtd || null;
+
+    return `<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8"/>
+<style>
+  @page { size: A4; margin: 15mm 12mm; }
+  body{
+    font-family:"Times New Roman", Times, serif;
+    color:#000;
+    margin:0;
+    font-size:11pt;
+    line-height:1.35;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .header{
+    text-align:center;
+    font-weight:bold;
+    font-size:12pt;
+    letter-spacing:.4pt;
+    text-transform:uppercase;
+    margin-top:2mm;
+  }
+  .title{
+    text-align:center;
+    font-size:16pt;
+    font-weight:bold;
+    text-transform:uppercase;
+    margin:3mm 0 7mm;
+  }
+  .row{
+    display:grid;
+    grid-template-columns: 48mm 4mm 1fr 18mm 40mm 4mm 1fr;
+    column-gap:1.5mm;
+    row-gap:1mm;
+    margin:1.8mm 0;
+    align-items:start;
+  }
+  .row.single{ grid-template-columns: 48mm 4mm 1fr; }
+  .label{ white-space:nowrap; }
+  .colon{ text-align:center; }
+  .value{ white-space:pre-wrap; }
+  .nopls{
+    display:flex; justify-content:center; align-items:center; gap:3mm;
+    margin:0 0 3mm;
+  }
+  .nopls .plval{
+    min-width:70mm; text-align:center; border-bottom:0.35mm solid #000;
+    padding:0 2mm 1mm;
+  }
+  .jenis-wrap{ margin:2mm 0 3mm; }
+  .jenis-line{
+    display:flex; flex-wrap:wrap; gap:10mm; margin-left:24mm; margin-top:1mm;
+  }
+  .lainnya-line{
+    margin-left:24mm; margin-top:1.5mm;
+    display:grid; grid-template-columns: 18mm 4mm 1fr; column-gap:1.5mm;
+  }
+  table{
+    width:100%; border-collapse:collapse; margin:3mm 0 4mm; font-size:11pt;
+  }
+  th, td{ border:1px solid #000; padding:2mm 2.2mm; vertical-align:top; }
+  th{ text-align:center; font-weight:bold; }
+  .box{
+    border:1px solid #000; padding:2.5mm; white-space:pre-wrap;
+    height:auto; min-height:25mm;
+  }
+  .signs{
+    display:grid; grid-template-columns:1fr 1fr;
+    margin-top:8mm; column-gap:30mm;
+  }
+  .sign-col{ text-align:center; }
+  .sign-space{ height:28mm; }
+  .sign-img{ max-height:28mm; max-width:70mm; display:block; margin:0 auto; }
+  .sign-name{ font-weight:bold; text-decoration:underline; }
+  .lampiran-page{
+    page-break-after: always;
+    display:flex; align-items:center; justify-content:center;
+    margin-top: 6mm; padding: 0; height: auto;
+  }
+  .lampiran-page:last-child{ page-break-after: auto; }
+  .lampiran-img{
+    width: 100%; height: auto; max-height: 250mm; object-fit: contain;
+  }
+</style>
+</head>
+<body>
+
+  <div class="header">JASA RAHARJA WILAYAH RIAU</div>
+  <div class="title">LAPORAN HASIL SURVEI</div>
+
+  <div class="nopls">
+    <div>No. PL/</div>
+    <div class="value">${escapeHtml(vv.noPL || "")}</div>
+  </div>
+
+  <div class="row">
+    <div class="label">Hari/tanggal survei</div>
+    <div class="colon">:</div>
+    <div class="value">${escapeHtml(fmtDate(vv.hariTanggal))}</div>
+    <div></div>
+    <div class="label">Petugas survei</div>
+    <div class="colon">:</div>
+    <div class="value">${escapeHtml(vv.petugas || "")}</div>
+  </div>
+
+  <div class="jenis-wrap">
+    <div class="row single" style="margin-bottom:0;">
+      <div class="label">Jenis survei</div><div class="colon"></div><div></div>
+    </div>
+
+    <div class="jenis-line">
+      <div>${chk(isKetKorban)} Keterjaminan korban</div>
+      <div>${chk(isKeabsWaris)} Keabsahan ahli waris</div>
+      <div>${chk(isKeabsBiaya)} Keabsahan biaya perawatan/pengobatan</div>
+    </div>
+
+    <div class="lainnya-line">
+      <div class="label">Lainnya</div>
+      <div class="colon">:</div>
+      <div class="value">${escapeHtml(lainnyaTxt || "")}</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="label">Nama korban</div><div class="colon">:</div>
+    <div class="value">${escapeHtml(vv.korban || "")}</div>
+    <div></div>
+    <div class="label">No. Berkas</div><div class="colon">:</div>
+    <div class="value">${escapeHtml(vv.noBerkas || "")}</div>
+  </div>
+
+  <div class="row single">
+    <div class="label">Alamat Korban</div><div class="colon">:</div>
+    <div class="value">${escapeHtml(vv.alamatKorban || "")}</div>
+  </div>
+
+  <div class="row single">
+    <div class="label">Tempat/Tgl. Kecelakaan</div><div class="colon">:</div>
+    <div class="value">
+      ${escapeHtml(vv.tempatKecelakaan || "")} / ${escapeHtml(fmtDate(vv.tglKecelakaan))}
+    </div>
+  </div>
+
+  <div style="margin-top:2mm;">
+    <span class="label">Kesesuaian hubungan Ahli Waris dengan Korban:</span>
+    &nbsp;&nbsp;
+    <b>${vv.hubunganSesuai === "" ? "-" : vv.hubunganSesuai ? "Sesuai" : "Tidak Sesuai"}</b>
+    &nbsp;&nbsp; berdasarkan pengecekan NIK Korban pada database Ditjen Dukcapil dengan output URL:
+    https://dukcapil-dwh.jasaraharja.co.id
+  </div>
+
+  <div style="margin-top:4mm;font-weight:bold;">Sumber Informasi :</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:10mm">No</th>
+        <th>Identitas/Detil Sumber Informasi dan Metode Perolehan Informasi</th>
+        <th style="width:40mm">Tanda Tangan</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows || '<tr><td style="text-align:center">1</td><td></td><td></td></tr>'}
+    </tbody>
+  </table>
+
+  <div style="margin-top:2mm;font-weight:bold;">Uraian dan Kesimpulan Hasil Survei :</div>
+  <div class="box">${escapeHtml(vv.uraian || "")}</div>
+
+  <p style="margin-top:4mm;">
+    Demikian laporan hasil survei ini dibuat dengan sebenarnya sesuai dengan informasi yang diperoleh.
+  </p>
+
+  <div class="signs">
+    <div class="sign-col">
+      <div>Mengetahui,</div>
+      <div class="sign-space"></div>
+      <div class="sign-name">Andi Raharja</div>
+      <div>Kepala Bagian Operasional</div>
+    </div>
+
+    <div class="sign-col">
+      <div>Petugas Survei,</div>
+      <div class="sign-space">
+        ${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : ""}
+      </div>
+      <div class="sign-name">${escapeHtml(vv.petugas || "..............................")}</div>
+      <div>${escapeHtml(vv.petugasJabatan || "")}</div>
+    </div>
+  </div>
+
+  ${filePages.join("")}
+
+</body>
+</html>`;
+  }
+
+  // ===============================
+  // PRINT KUNJUNGAN RS
+  // ===============================
+  const openPrint = useCallback(async () => {
     try {
       const vv = await prepareForOutput(data);
       const fotoList = vv.allPhotos || [];
 
-      // Ambil foto-foto upload (kalau ada)
       const fotosHTML = fotoList.length
         ? fotoList
             .map(
               (f) => `
           <div style="margin:5px; text-align:center;">
             <img src="${f.dataURL}" alt="${f.name}" style="max-width:230px; max-height:230px; border:1px solid #999; border-radius:8px; margin:5px;"/>
-            <div style="font-size:12px;">${f.name}</div>
           </div>`
             )
             .join("")
@@ -437,7 +1366,6 @@ export default function Step4({ data, setData, back, next }) {
 
       const petugasSrc = vv.petugasTtd || null;
 
-      // === HTML TEMPLATE ===
       const srcdoc = `
       <!DOCTYPE html>
       <html lang="id">
@@ -458,10 +1386,7 @@ export default function Step4({ data, setData, back, next }) {
           text-transform: uppercase;
           margin-bottom: 20px;
         }
-        table {
-          width: 100%;
-          font-size: 14px;
-        }
+        table { width: 100%; font-size: 14px; }
         td { padding: 4px 8px; vertical-align: top; }
         .label { width: 220px; color: black; }
         .box {
@@ -471,14 +1396,11 @@ export default function Step4({ data, setData, back, next }) {
           margin-top: 6px;
         }
         .foto-container {
-          display: flex;
-          flex-wrap: wrap;
-          margin-top: 10px;
+          display: flex; flex-wrap: wrap; margin-top: 10px;
         }
         .ttd {
           margin-top: 40px;
-          display: flex;
-          justify-content: space-between;
+          display: flex; justify-content: space-between;
           font-size: 14px;
         }
         .sign-img {
@@ -487,16 +1409,13 @@ export default function Step4({ data, setData, back, next }) {
           display: block;
           margin-top: 8px;
         }
-        h4 {
-          color: black;
-          margin-top: 20px;
-        }
+        h4 { color: black; margin-top: 20px; }
       </style>
       </head>
       <body>
         <div class="judul">
           LEMBAR HASIL CETAK KUNJUNGAN KE RUMAH SAKIT <br/>
-          APLIKASI MOBILE PELAYANAN
+          APLIKASI MOBILE PELAYAN
         </div>
 
         <table>
@@ -540,11 +1459,9 @@ export default function Step4({ data, setData, back, next }) {
       </html>
       `;
 
-      // === Buat blob dari HTML ===
       const blob = new Blob([srcdoc], { type: "text/html" });
       const url = URL.createObjectURL(blob);
 
-      // === Simpan hasil ke form global
       setData((prev) => ({
         ...prev,
         hasilFormFile: {
@@ -552,9 +1469,9 @@ export default function Step4({ data, setData, back, next }) {
           dataURL: url,
           label: "Hasil Formulir Kunjungan RS",
         },
+        sudahDownloadPDF: true,
       }));
 
-      // === Cetak via iframe ===
       const iframe = document.createElement("iframe");
       iframe.style.display = "none";
       iframe.src = url;
@@ -565,821 +1482,23 @@ export default function Step4({ data, setData, back, next }) {
           iframe.contentDocument.title = `LaporanKunjungan_${safeName}`;
           iframe.contentWindow.focus();
           iframe.contentWindow.print();
-        } catch (err) {
-          console.error("Gagal print:", err);
         } finally {
           setTimeout(() => document.body.removeChild(iframe), 2000);
         }
       };
+
       setHasDownloadedPDF(true);
-      setData((prev) => ({ ...prev, sudahDownloadPDF: true }));
     } catch (err) {
       console.error("Gagal openPrint:", err);
     }
-  };
-
-  async function checkForm(data) {
-    const result = {};
-    const getVal = (v) => (typeof v === "string" ? v.trim() : v ?? "");
-
-    const val = {
-      foto: getVal(data.fotoSurveyList?.[0]),
-      korban: getVal(data.korban),
-      lokasi: getVal(data.lokasiKecelakaan),
-      rumahSakit: getVal(data.rumahSakit),
-      uraian: getVal(data.uraianKunjungan),
-      rekomendasi: getVal(data.rekomendasi),
-    };
-
-    const isNonsense = (text) => {
-      if (!text) return true;
-      const lower = text.toLowerCase();
-
-      // Kalau terlalu banyak huruf sama berulang (contoh: kkkkkkkk)
-      if (/(.)\1{4,}/.test(lower)) { 
-        console.log("⚠️ Nonsense karena huruf berulang"); 
-        return true;
-      }
-
-      // Kalau tidak ada spasi dan panjangnya lebih dari 25
-      if (!lower.includes(" ") && lower.length > 25) {
-        console.log("⚠️ Nonsense karena tidak ada spasi dan panjang");
-        return true;
-      }
-
-      // Kalau terlalu sedikit huruf vokal dibanding konsonan
-      const vowels = (lower.match(/[aiueo]/g) || []).length;
-      const ratio = vowels / lower.length;
-      if (ratio < 0.3) {
-        console.log("⚠️ Nonsense karena kekurangan vokal", ratio);
-        return true;
-      }
-
-      // Kalau semua huruf random tanpa kata umum
-      const commonWords = ["dan", "di", "ke", "yang", "untuk", "dengan", "karena"];
-      const hasCommon = commonWords.some((w) => lower.includes(w));
-      if (!hasCommon && lower.split(" ").length < 3) {
-        console.log("⚠️ Nonsense karena kata terlalu sedikit atau tanpa kata umum");
-        return true;
-      }
-
-      console.log("✅ Teks dianggap bermakna");
-      return false;
-    };
-
-    const validLokasi = (text) => {
-      if (!text) return false;
-      const words = text.trim().split(/\s+/);
-      if (words.length < 3) return false;
-      const hasClue = /(jalan|jl\.|dekat|simpang|gedung|rumah|desa|kelurahan|kecamatan)/i.test(text);
-      return hasClue;
-    };
-
-    console.log("🧩 Nilai akhir yang dicek:", val);
-
-    // Foto
-    if (!val.foto) result.foto = "❌ Belum unggah";
-    else if (["clear", "baik", "jelas"].includes((data.fotoQuality || "").toLowerCase()))
-      result.foto = "✅ Foto jelas";
-    else result.foto = " ✅ Foto terlihat ";
-
-    // Nama Korban
-    if (!val.korban) result.korban = "❌ Belum isi";
-    else if (/\b(dr|mr|mrs|ir|s\.t|s\.kom)\b/i.test(val.korban))
-      result.korban = "❌ Nama korban tidak boleh ada gelar";
-    else result.korban = "✅ Nama korban sesuai ketentuan";
-
-    // Lokasi
-    if (!val.lokasi) result.lokasi = "❌ Belum isi";
-    else if (!validLokasi(val.lokasi))
-      result.lokasi = "❌ Lokasi belum cukup detail (tambah nama jalan/area/lokasi terdekat)";
-    else result.lokasi = "✅ Lokasi lengkap";
-
-    // Rumah Sakit
-    if (!val.rumahSakit) result.rumahSakit = "❌ Belum isi";
-    else if (val.rumahSakit !== val.rumahSakit.toUpperCase())
-      result.rumahSakit = "❌ Nama RS tidak kapital semua";
-    else result.rumahSakit = "✅ Nama RS kapital semua";
-
-    // Uraian
-    if (!val.uraian) result.uraian = "❌ Belum isi";
-    else if (val.uraian.length < 20) result.uraian = "❌ Uraian terlalu singkat";
-    else if (isNonsense(val.uraian)) result.uraian = "❌ Uraian tidak bermakna";
-    else if (val.uraian.includes("sesuai ketentuan"))
-      result.uraian = "✅ Uraian sesuai ketentuan";
-    else result.uraian = "✅ Uraian deskriptif";
-
-    // Rekomendasi
-    if (!val.rekomendasi) result.rekomendasi = "❌ Belum isi";
-    else if (val.rekomendasi.length < 15)
-      result.rekomendasi = "❌ Rekomendasi terlalu pendek";
-    else if (isNonsense(val.rekomendasi))
-      result.rekomendasi = "❌ Rekomendasi tidak bermakna";
-    else if (val.rekomendasi.includes("direkomendasikan"))
-      result.rekomendasi = "✅ Rekomendasi sesuai ketentuan";
-    else result.rekomendasi = "✅ Rekomendasi jelas";
-
-    console.log("✅ Hasil akhir result:", result);
-    setMlResult(result);
-    setData((prev) => ({ ...prev, mlResult: result }));
-    const allValid = Object.values(result).every(v => v.startsWith("✅"));
-    if (allValid) {
-      console.log("🎉 Semua hasil valid, simpan ke Supabase...");
-      const savedId = await saveKunjunganToSupabase(data);
-      if (savedId) {
-        setData(prev => ({ ...prev, formSavedId: savedId }));
-      }
-    }
-    return result;
-  }
-
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    "pdfjs-dist/build/pdf.worker.min.mjs",
-    import.meta.url
-  ).toString();
-
-  async function pdfToImages(file) {
-    const pdf = await pdfjsLib.getDocument(await file.arrayBuffer()).promise;
-    const images = [];
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const viewport = page.getViewport({ scale: 2 });
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      images.push(canvas.toDataURL("image/png"));
-    }
-    return images;
-  }
-
-  async function uploadSumberInformasi(files) {
-    if (!files || !Array.isArray(files) || files.length === 0) {
-        console.log("❌ No files to upload for sumber informasi");
-        return [];
-    }
-
-    console.log(`📤 Starting upload of ${files.length} files to folder: SUMBER-INFORMASI`);
-
-    const uploadPromises = files.map(async (fileItem, index) => {
-        try {
-            console.log(`🔄 Processing sumber info file ${index + 1}:`, {
-                name: fileItem.name,
-                hasFile: !!fileItem.file,
-                hasDataURL: !!fileItem.dataURL,
-                sumberIndex: fileItem.sumberIndex,
-                fotoIndex: fileItem.fotoIndex
-            });
-            
-            let fileToUpload;
-            let fileName;
-            let label = fileItem.label || "Sumber Informasi";
-            let sumberIndex = fileItem.sumberIndex;
-            let fotoIndex = fileItem.fotoIndex;
-
-            // ✅ HANDLE BERBAGAI FORMAT FILE SUMBER INFORMASI
-            if (fileItem.file && fileItem.file instanceof File) {
-                fileToUpload = fileItem.file;
-                fileName = fileItem.name || fileItem.file.name;
-                console.log(`📄 File object: ${fileName}`);
-            } 
-            else if (fileItem.dataURL && (fileItem.dataURL.startsWith('data:') || fileItem.dataURL.startsWith('blob:'))) {
-                // Handle dataURL/blob URL (foto dari canvas/signature)
-                console.log(`🌐 Converting dataURL to file: ${fileItem.dataURL.substring(0, 50)}...`);
-                try {
-                    const response = await fetch(fileItem.dataURL);
-                    const blob = await response.blob();
-                    fileToUpload = new File([blob], fileItem.name || `sumber_info_${Date.now()}.png`, { 
-                        type: blob.type || 'image/png'
-                    });
-                    fileName = fileItem.name || `sumber_info_${Date.now()}.png`;
-                    console.log(`✅ Converted dataURL to file: ${fileName}`);
-                } catch (convertError) {
-                    console.error(`❌ Failed to convert dataURL:`, convertError);
-                    return null;
-                }
-            }
-            else if (fileItem instanceof File) {
-                fileToUpload = fileItem;
-                fileName = fileItem.name;
-                console.log(`📄 Direct File object: ${fileName}`);
-            }
-            else {
-                console.log("❌ Skip item - not a valid file for sumber info:", fileItem);
-                return null;
-            }
-
-            // Pastikan fileToUpload ada
-            if (!fileToUpload) {
-                console.log("❌ No file to upload after processing");
-                return null;
-            }
-
-            // Generate unique filename
-            const timestamp = Date.now();
-            const randomStr = Math.random().toString(36).substring(2, 8);
-            const fileExt = fileName.split('.').pop() || 'png';
-            const uniqueFileName = `sumber_${sumberIndex || 0}_foto_${fotoIndex || 0}_${timestamp}_${randomStr}.${fileExt}`;
-            const filePath = `sumber-informasi/${uniqueFileName}`; // ✅ PASTIKAN FOLDER BENAR
-
-            console.log(`📤 Uploading sumber info ${index + 1}/${files.length}: ${label} - ${uniqueFileName}`);
-
-            // Upload ke Supabase - ✅ PASTIKAN BUCKET BENAR
-            const { data, error } = await supabase.storage
-                .from('foto-survey')
-                .upload(filePath, fileToUpload, {
-                    cacheControl: '3600',
-                    upsert: false
-                });
-
-            if (error) {
-                console.error(`❌ Upload failed for ${fileName}:`, error);
-                console.error(`❌ Error details:`, error.message);
-                return null;
-            }
-
-            // Get public URL
-            const { data: urlData } = supabase.storage
-                .from('foto-survey')
-                .getPublicUrl(filePath);
-
-            console.log(`✅ SUMBER INFO Upload success: ${uniqueFileName}`, urlData.publicUrl);
-
-            return {
-                name: fileName,
-                fileName: uniqueFileName,
-                path: filePath,
-                url: urlData.publicUrl,
-                size: fileToUpload.size,
-                type: fileToUpload.type,
-                label: label,
-                category: "sumber_info", 
-                uploadedAt: new Date().toISOString(),
-                sumberIndex: sumberIndex,
-                fotoIndex: fotoIndex,
-                folder: 'sumber-informasi' // ✅ PASTIKAN FOLDER TERCATAT
-            };
-
-        } catch (error) {
-            console.error(`❌ Error uploading sumber info file ${index}:`, error);
-            return null;
-        }
-    });
-
-    const results = await Promise.all(uploadPromises);
-    const successfulUploads = results.filter(Boolean);
-    
-    console.log(`✅ Successfully uploaded ${successfulUploads.length}/${files.length} files to SUMBER-INFORMASI`);
-    return successfulUploads;
-  }
-
-  async function uploadTTDPetugas(ttdFile, fileName) {
-    try {
-      // Generate unique filename
-      const timestamp = Date.now();
-      const randomStr = Math.random().toString(36).substring(2, 8);
-      const finalFileName = `${timestamp}_${randomStr}.png`;
-      const filePath = `ttd-petugas/${finalFileName}`;
-
-      // Upload ke bucket foto-survey
-      const { data, error } = await supabase.storage
-        .from('foto-survey')
-        .upload(filePath, ttdFile);
-
-      if (error) {
-        console.error('❌ Gagal upload TTD:', error);
-        return null;
-      }
-
-      // Dapatkan public URL
-      const { data: urlData } = supabase.storage
-        .from('foto-survey')
-        .getPublicUrl(filePath);
-
-      console.log('✅ TTD berhasil diupload:', urlData.publicUrl);
-      return urlData.publicUrl;
-
-    } catch (error) {
-      console.error('❌ Error upload TTD:', error);
-      return null;
-    }
-  }
-
-  async function uploadFotoSurvey(files, folder = 'survey-images') {
-    if (!files || !Array.isArray(files) || files.length === 0) {
-        console.log("❌ No files to upload for foto survey");
-        return [];
-    }
-
-    console.log(`📤 Starting upload of ${files.length} files to ${folder}...`);
-
-    const uploadPromises = files.map(async (fileItem, index) => {
-        try {
-            console.log(`🔄 Processing file ${index + 1}:`, fileItem);
-            
-            let fileToUpload;
-            let fileName;
-            let label = fileItem.label || "Foto Survey";
-            let type = fileItem.type || "foto";
-            let sumberIndex = fileItem.sumberIndex;
-            let fotoIndex = fileItem.fotoIndex;
-
-            // Handle berbagai format file
-            if (fileItem instanceof File) {
-                fileToUpload = fileItem;
-                fileName = fileItem.name;
-                console.log(`📄 File object: ${fileName}`);
-            } 
-            else if (fileItem.file && fileItem.file instanceof File) {
-                fileToUpload = fileItem.file;
-                fileName = fileItem.name || fileItem.file.name;
-                console.log(`📄 File in object: ${fileName}`);
-            } 
-            else if (fileItem.url && fileItem.url.startsWith('blob:')) {
-                // Handle blob URL - convert to File
-                console.log(`🌐 Converting blob URL to file: ${fileItem.url}`);
-                const response = await fetch(fileItem.url);
-                const blob = await response.blob();
-                fileToUpload = new File([blob], fileItem.name || `foto_${Date.now()}.png`, { 
-                    type: blob.type 
-                });
-                fileName = fileItem.name || `foto_${Date.now()}.png`;
-                console.log(`✅ Converted blob to file: ${fileName}`);
-            }
-            else if (fileItem.url && fileItem.url.startsWith('http')) {
-                console.log(`🔗 Skip - already uploaded URL: ${fileItem.url}`);
-                return fileItem; // Skip jika sudah ada URL
-            }
-            else {
-                console.log("❌ Skip item - not a valid file:", fileItem);
-                return null;
-            }
-
-            // Gunakan label/type dari fileItem jika ada
-            if (fileItem.label) label = fileItem.label;
-            if (fileItem.type) type = fileItem.type;
-
-            // Generate unique filename
-            const timestamp = Date.now();
-            const randomStr = Math.random().toString(36).substring(2, 8);
-            const uniqueFileName = `${timestamp}_${randomStr}_${fileName}`;
-            const filePath = `${folder}/${uniqueFileName}`;
-
-            console.log(`📤 Uploading ${index + 1}/${files.length}: ${label} - ${uniqueFileName}`);
-
-            // Upload ke Supabase
-            const { data, error } = await supabase.storage
-                .from('foto-survey')
-                .upload(filePath, fileToUpload, {
-                    cacheControl: '3600',
-                    upsert: false
-                });
-
-            if (error) {
-                console.error(`❌ Upload failed for ${fileName}:`, error);
-                return null;
-            }
-
-            // Get public URL
-            const { data: urlData } = supabase.storage
-                .from('foto-survey')
-                .getPublicUrl(filePath);
-
-            console.log(`✅ Upload success: ${uniqueFileName}`, urlData.publicUrl);
-
-            return {
-                name: fileName,
-                fileName: uniqueFileName,
-                path: filePath,
-                url: urlData.publicUrl,
-                size: fileToUpload.size,
-                type: fileToUpload.type,
-                label: label,
-                category: type, 
-                uploadedAt: new Date().toISOString(),
-                sumberIndex: sumberIndex,
-                fotoIndex: fotoIndex,
-                folder: folder
-            };
-
-        } catch (error) {
-            console.error(`❌ Error uploading file ${index}:`, error);
-            return null;
-        }
-    });
-
-    const results = await Promise.all(uploadPromises);
-    const successfulUploads = results.filter(Boolean);
-    
-    console.log(`✅ Successfully uploaded ${successfulUploads.length}/${files.length} files`);
-    return successfulUploads;
-  }
-
-  console.log("🔍 === STEP4 DATA DEBUG ===");
-  console.log("📦 Data lengkap sebelum save:", data);
-  console.log("📸 attachSurvey:", data.attachSurvey);
-  console.log("📸 attachSurvey.fotoSurvey:", data.attachSurvey?.fotoSurvey);
-  console.log("📸 fotoSurveyList:", data.fotoSurveyList);
-  console.log("📸 Jumlah foto:", data.attachSurvey?.fotoSurvey?.length || 0);
-
-  if (data.attachSurvey?.fotoSurvey) {
-    console.log("📸 Detail setiap foto:");
-    data.attachSurvey.fotoSurvey.forEach((foto, index) => {
-        console.log(`   [${index}]`, {
-            name: foto.name,
-            hasFile: !!foto.file,
-            hasUrl: !!foto.url,
-            urlType: foto.url?.substring(0, 30),
-            keys: Object.keys(foto)
-        });
-    });
-  } else {
-      console.log("❌ Tidak ada fotoSurvey di data");
-  }
-
-  // Cek juga di localStorage
-  const savedData = localStorage.getItem("hasilSurveyData");
-  if (savedData) {
-      const parsed = JSON.parse(savedData);
-      console.log("💾 Data di localStorage - fotoSurvey:", parsed.fotoSurvey);
-  }
-
-  async function saveSurveyToSupabase(raw) {
-    console.log("🔍 RAW DATA sebelum save:", raw);
-    console.log("🔍 petugasTtd value:", raw.petugasTtd);
-    console.log("🔍 Type of petugasTtd:", typeof raw.petugasTtd);
-    console.log("🔍 attachSurvey.petugasTtd:", raw.attachSurvey?.petugasTtd);
-    const toISODate = (d) => {
-      if (!d) return null;
-      if (/^\d{4}-\d{2}-\d{2}$/.test(String(d))) return String(d);
-      const t = new Date(d);
-      return Number.isNaN(t.getTime()) ? null : t.toISOString().slice(0, 10);
-    };
-
-    const sifat = String(raw.sifatCidera || '').toLowerCase().includes('md') ? 'meninggal' : 'luka';
-    const jenisSurvei = typeof raw.jenisSurvei === 'string'
-      ? raw.jenisSurvei.replace('keabsahan_waris','keabsahan_ahli_waris')
-      : null;
-
-    let petugasTtdUrl = null;
-    if (raw.attachSurvey?.petugasTtd) {
-      const ttdData = raw.attachSurvey.petugasTtd;
-      console.log("📁 TTD dari attachSurvey:", ttdData);
-      
-      if (ttdData.file && ttdData.file instanceof File) {
-        console.log("📤 Upload TTD file...");
-        petugasTtdUrl = await uploadTTDPetugas(ttdData.file, 'ttd-petugas');
-      } else if (ttdData.url && typeof ttdData.url === 'string') {
-        console.log("🔗 TTD sudah ada URL:", ttdData.url);
-        petugasTtdUrl = ttdData.url;
-      }
-    }
-    // Fallback: cek di root (untuk kompatibilitas)
-    else if (raw.petugasTtd && raw.petugasTtd instanceof File) {
-      console.log("📤 Upload TTD dari root...");
-      petugasTtdUrl = await uploadTTDPetugas(raw.petugasTtd, 'ttd-petugas');
-    } else if (typeof raw.petugasTtd === 'string' && raw.petugasTtd.trim()) {
-      console.log("🔗 TTD URL dari root:", raw.petugasTtd);
-      petugasTtdUrl = raw.petugasTtd;
-    }
-
-    console.log("✅ Final petugasTtdUrl:", petugasTtdUrl);
-
-    const allFotoFiles = [];
-    const allSumberInfoFiles = [];
-
-    console.log("🔍 === FOTO SURVEY DEBUG ===");
-    console.log("📤 raw.attachSurvey?.fotoSurvey:", raw.attachSurvey?.fotoSurvey);
-    console.log("📤 raw.fotoSurveyList:", raw.fotoSurveyList);
-    console.log("📤 Final allFotoFiles:", allFotoFiles);
-    console.log("📤 Array.isArray:", Array.isArray(allFotoFiles));
-    console.log("📤 Length:", allFotoFiles.length);
-
-    console.log("🔍 === SUMBER INFO DEBUG ===");
-    console.log("📤 raw.sumbers:", raw.sumbers);
-    console.log("📤 Array.isArray raw.sumbers:", Array.isArray(raw.sumbers));
-
-    console.log("🔍 === DETAILED SUMBER INFO DEBUG ===");
-
-    if (Array.isArray(raw.sumbers)) {
-        console.log("✅ raw.sumbers is array with length:", raw.sumbers.length);
-        
-        let totalSumberWithFoto = 0;
-        let totalFotoFiles = 0;
-        
-        raw.sumbers.forEach((sumber, index) => {
-            console.log(`--- Sumber ${index} ---`);
-            console.log(`   Identitas: "${sumber.identitas}"`);
-            console.log(`   Foto exists: ${!!sumber.foto}`);
-            console.log(`   Foto is array: ${Array.isArray(sumber.foto)}`);
-            
-            if (sumber.foto && Array.isArray(sumber.foto)) {
-                console.log(`   Jumlah foto: ${sumber.foto.length}`);
-                totalSumberWithFoto++;
-                totalFotoFiles += sumber.foto.length;
-                
-                sumber.foto.forEach((foto, fotoIndex) => {
-                    console.log(`   > Foto ${fotoIndex}:`, {
-                        hasFile: !!foto.file,
-                        fileType: foto.file?.constructor?.name,
-                        hasDataURL: !!foto.dataURL,
-                        dataURLType: foto.dataURL?.substring(0, 50),
-                        hasURL: !!foto.url,
-                        name: foto.name,
-                        keys: Object.keys(foto)
-                    });
-                    
-                    // Cek apakah file valid
-                    if (foto.file && foto.file instanceof File) {
-                        console.log(`   ✅ Valid File object: ${foto.file.name} (${foto.file.size} bytes)`);
-                    } else if (foto.dataURL && foto.dataURL.startsWith('data:')) {
-                        console.log(`   ✅ Valid DataURL: ${foto.dataURL.substring(0, 100)}...`);
-                    } else if (foto.dataURL && foto.dataURL.startsWith('blob:')) {
-                        console.log(`   ✅ Valid Blob URL: ${foto.dataURL}`);
-                    } else {
-                        console.log(`   ❌ Invalid foto source`);
-                    }
-                });
-            } else {
-                console.log(`   ❌ Tidak ada foto array atau foto bukan array`);
-            }
-        });
-        
-        console.log(`📊 SUMMARY: ${totalSumberWithFoto} sumbers with foto, ${totalFotoFiles} total foto files`);
-    } else {
-        console.log("❌ raw.sumbers bukan array:", typeof raw.sumbers, raw.sumbers);
-    }
-
-    // 1. Foto Survey
-    if (raw.attachSurvey?.fotoSurvey && Array.isArray(raw.attachSurvey.fotoSurvey)) {
-        console.log("📸 Menambahkan foto survey:", raw.attachSurvey.fotoSurvey.length);
-        allFotoFiles.push(...raw.attachSurvey.fotoSurvey);
-    }
-    
-    // 2. Maps/SS Peta
-    if (raw.attachSurvey?.mapSS) {
-        console.log("🗺️ Menambahkan maps/SS peta");
-        allFotoFiles.push({
-            ...raw.attachSurvey.mapSS,
-            label: "Peta Lokasi", // Tambahkan label untuk identifikasi
-            type: "map"
-        });
-    }
-    
-    // 3. Barcode/QR
-    if (raw.attachSurvey?.barcode) {
-        console.log("📱 Menambahkan barcode/QR");
-        allFotoFiles.push({
-            ...raw.attachSurvey.barcode,
-            label: "Barcode/QR", // Tambahkan label untuk identifikasi  
-            type: "barcode"
-        });
-    }
-
-    // 4. Foto Sumber Informasi
-    if (Array.isArray(raw.sumbers)) {
-        console.log("👥 Processing sumbers for foto sumber informasi:", raw.sumbers.length);
-        
-        raw.sumbers.forEach((sumber, index) => {
-            if (sumber.foto && Array.isArray(sumber.foto)) {
-                console.log(`📸 Sumber ${index + 1} memiliki ${sumber.foto.length} foto`);
-                
-                sumber.foto.forEach((foto, fotoIndex) => {
-                    console.log(`   > Foto ${fotoIndex}:`, {
-                        hasFile: !!foto.file,
-                        hasDataURL: !!foto.dataURL,
-                        hasUrl: !!foto.url,
-                        name: foto.name,
-                        // Cek semua kemungkinan properti
-                        keys: Object.keys(foto)
-                    });
-                    
-                    // ✅ VALIDASI LEBIH LUAS - terima berbagai format
-                    const isValidFile = (
-                        (foto.file && foto.file instanceof File) ||
-                        (foto.dataURL && (foto.dataURL.startsWith('data:') || foto.dataURL.startsWith('blob:'))) ||
-                        (foto.url && (foto.url.startsWith('data:') || foto.url.startsWith('blob:'))) ||
-                        (typeof foto === 'string' && (foto.startsWith('data:') || foto.startsWith('blob:'))) // Support old format
-                    );
-                    
-                    if (isValidFile) {
-                        // Normalisasi ke format yang konsisten
-                        const normalizedFoto = {
-                            ...(typeof foto === 'string' ? { dataURL: foto } : foto), // Handle old string format
-                            label: `Sumber ${index + 1} - ${sumber.identitas || 'Unknown'}`,
-                            type: "sumber_info",
-                            sumberIndex: index,
-                            fotoIndex: fotoIndex
-                        };
-                        
-                        console.log(`   ✅ Adding to upload queue:`, {
-                            name: normalizedFoto.name,
-                            label: normalizedFoto.label,
-                            sumberIndex: normalizedFoto.sumberIndex
-                        });
-                        
-                        allSumberInfoFiles.push(normalizedFoto);
-                    } else {
-                        console.log(`   ❌ Skip foto - no valid source for sumber info`);
-                        console.log(`   ❌ File details:`, foto);
-                    }
-                });
-            } else {
-                console.log(`   ℹ️ Sumber ${index + 1} tidak memiliki foto atau foto bukan array`);
-            }
-        });
-        
-        console.log(`📦 Total allSumberInfoFiles collected: ${allSumberInfoFiles.length}`);
-    } else {
-        console.log("❌ raw.sumbers bukan array atau tidak ada:", raw.sumbers);
-    }
-
-    console.log("📦 Total foto survey yang akan diupload:", allFotoFiles.length);
-    console.log("📦 Total foto sumber informasi yang akan diupload:", allSumberInfoFiles.length);
-    console.log("📦 Detail foto survey:", allFotoFiles);
-    console.log("📦 Detail foto sumber info:", allSumberInfoFiles);
-
-    console.log("📂 Processing dokumen KTP, KK, dll...");
-  
-    const dokumenResults = await uploadSemuaDokumen(raw.attachSurvey || {}, raw.id);
-    
-    if (dokumenResults.success.length > 0) {
-      console.log("✅ Dokumen berhasil diupload:", dokumenResults.success.map(d => d.jenis));
-    }
-    if (dokumenResults.failed.length > 0) {
-      console.log("❌ Dokumen gagal diupload:", dokumenResults.failed.map(d => d.jenis));
-    }
-
-    let uploadedAllFotos = [];
-    let uploadedSumberInfoFotos = [];
-    
-    if (allFotoFiles.length > 0) {
-        console.log("📤 Starting upload ALL photos...");
-        uploadedAllFotos = await uploadFotoSurvey(allFotoFiles, 'survey-images');
-        console.log("✅ All photos upload completed. Results:", uploadedAllFotos);
-    } else {
-        console.log("❌ Tidak ada foto yang perlu diupload");
-    }
-
-    if (allSumberInfoFiles.length > 0) {
-      console.log("🔍 === PRE-UPLOAD SUMBER INFO DEBUG ===");
-      console.log("📁 Folder target: sumber-informasi");
-      console.log("📦 Files ready for upload:", allSumberInfoFiles.map((f, index) => ({
-          index,
-          name: f.name,
-          hasFile: !!f.file,
-          hasDataURL: !!f.dataURL,
-          fileType: f.file?.constructor?.name,
-          dataURLType: f.dataURL?.substring(0, 50),
-          label: f.label,
-          sumberIndex: f.sumberIndex,
-          fotoIndex: f.fotoIndex
-      })));
-        console.log("📤 Starting upload SUMBER INFO photos to folder: sumber-informasi");
-        
-        uploadedSumberInfoFotos = await uploadSumberInformasi(allSumberInfoFiles);
-        console.log("✅ Sumber info photos upload completed. Results:", uploadedSumberInfoFotos);
-        
-        // Cek hasil upload
-        if (uploadedSumberInfoFotos.length === 0) {
-            console.log("❌ WARNING: No sumber info photos were uploaded successfully!");
-            console.log("❌ Mungkin ada masalah dengan:");
-            console.log("   - Format file tidak didukung");
-            console.log("   - File terlalu besar");
-            console.log("   - Koneksi internet");
-            console.log("   - Permissions Supabase storage");
-        } else {
-            console.log(`🎉 Successfully uploaded ${uploadedSumberInfoFotos.length} sumber info photos to folder 'sumber-informasi'`);
-            uploadedSumberInfoFotos.forEach(foto => {
-                console.log(`   ✅ Uploaded: ${foto.fileName} -> ${foto.url}`);
-                console.log(`   📁 Folder: ${foto.folder}`);
-            });
-        }
-    } else {
-        console.log("❌ Tidak ada foto sumber informasi yang perlu diupload - allSumberInfoFiles is empty");
-        console.log("❌ Kemungkinan penyebab:");
-        console.log("   - raw.sumbers kosong");
-        console.log("   - sumbers tidak memiliki array foto");
-        console.log("   - objek foto tidak memiliki property file/dataURL");
-    }
-
-    // siapkan sumbers mentah (identitas saja) untuk disimpan duluan
-    const sumbersLite = Array.isArray(raw.sumbers)
-      ? raw.sumbers.map(r => ({ identitas: r?.identitas || '' }))
-      : [];
-
-    const payload = {
-      no_pl:                raw.noPL || null,
-      hari_tanggal:         toISODate(raw.hariTanggal || raw.tanggalKecelakaan) || null,
-      petugas:              raw.petugas || raw.petugasSurvei || null,
-
-      jenis_survei:         jenisSurvei,
-      jenis_lainnya:        jenisSurvei ? null : (raw.jenisSurveiLainnya || null),
-
-      nama_korban:          raw.korban || raw.namaKorban || null,
-      no_berkas:            raw.noBerkas || null,
-      alamat_korban:        raw.alamatKorban || null,
-      tempat_kecelakaan:    raw.tempatKecelakaan || raw.lokasiKecelakaan || null,
-      tanggal_kecelakaan:   toISODate(raw.tanggalKecelakaan || raw.tglKecelakaan) || null,
-      hubungan_sesuai:      (typeof raw.hubunganSesuai === 'boolean') ? raw.hubunganSesuai : null,
-
-      sifat,
-      uraian:               raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
-      kesimpulan:           raw.kesimpulanSurvei ?? null,
-      petugas_ttd:          petugasTtdUrl,
-      foto_survey:          uploadedAllFotos,
-
-      attachments: {
-        ktp: !!raw.attachSurvey?.ktp,
-        kk: !!raw.attachSurvey?.kk,
-        buku_tabungan: !!raw.attachSurvey?.bukuTabungan,
-        form_pengajuan_santunan: !!raw.attachSurvey?.formPengajuan,
-        form_keterangan_ahli_waris: !!raw.attachSurvey?.formKeteranganAW,
-        surat_keterangan_kematian: !!raw.attachSurvey?.skKematian,
-        akta_kelahiran: !!raw.attachSurvey?.aktaKelahiran,
-        map_ss: !!raw.attachSurvey?.mapSS,
-        barcode_qr: !!raw.attachSurvey?.barcode,
-        foto_survey_count: uploadedAllFotos.length,
-        sumber_info_count: uploadedSumberInfoFotos.length,
-      },
-
-      // kolom baru:
-      sumbers: sumbersLite,           // isi awal: identitas saja (biar gampang)
-      // sumbers_paths: diisi setelah upload
-      local_id: raw.localId || null,
-    };
-
-    try {
-      // 1) INSERT duluan biar dapat ID
-      const { data: inserted, error: insErr } = await supabase
-        .from('form_survei_aw')
-        .insert(payload, { returning: 'representation' })
-        .select()
-        .single();
-
-      if (insErr) throw insErr;
-
-      // 2) Upload foto-foto sumber berdasarkan ID
-      const surveyId = inserted.id;
-      
-      const sumbersWithUploadedFotos = (raw.sumbers || []).map((sumber, index) => {
-        const uploadedFotosForSumber = uploadedSumberInfoFotos.filter(foto => 
-          foto.sumberIndex === index
-        );
-        
-        return {
-          identitas: sumber.identitas || '',
-          foto: uploadedFotosForSumber.map(foto => ({
-            name: foto.name,
-            fileName: foto.fileName,
-            url: foto.url,
-            uploadedAt: foto.uploadedAt
-          })),
-          foto_count: uploadedFotosForSumber.length
-        };
-      });
-
-      // 3) UPDATE baris dengan sumbers_paths + (opsional) lengkapi sumbers
-      const { error: updErr } = await supabase
-        .from('form_survei_aw')
-        .update({
-          sumbers: sumbersWithUploadedFotos,      
-          sumbers_paths: uploadedSumberInfoFotos,      
-        })
-        .eq('id', surveyId);
-
-      if (updErr) throw updErr;
-
-      console.log('✅ Survei tersimpan + semua foto terunggah:', {
-        surveyId,
-        fotoSurvey: uploadedAllFotos.length,
-        fotoSumberInfo: uploadedSumberInfoFotos.length
-      });
-      
-      return {
-        id: surveyId,
-        fotoSurvey: uploadedAllFotos,
-        fotoSumberInfo: uploadedSumberInfoFotos
-      };
-
-    } catch (err) {
-      const msg = [
-        err?.message,
-        err?.details && `details: ${err.details}`,
-        err?.hint && `hint: ${err.hint}`,
-        err?.code && `code: ${err.code}`,
-      ].filter(Boolean).join(' | ');
-      console.error('❌ Gagal simpan survei:', err);
-      toast.error(`Gagal menyimpan data survei. ${msg}`);
-      return null;
-    }
-  }
-
-  // 🖨️ Fungsi Download / Cetak HTML (Versi Survey - Meninggal Dunia)
+  }, [data, prepareForOutput, setData]);
+
+  // ===============================
+  // surveyMDComplete & surveyLLCompleteDetails
+  // (ISI TETAP PUNYAMU, nggak kuubah)
+  // ===============================
   const surveyMDComplete = (data) => {
     if (!data) return [];
-
     const v = data.v || data.form || data.survey || data.korban || data || {};
 
     const namaKorban =
@@ -1406,9 +1525,6 @@ export default function Step4({ data, setData, back, next }) {
     const att = data.attachSurvey || {};
     const result = {};
 
-    const isFilled = (v) => !!(v && String(v).trim() !== "");
-
-    // --- VALIDASI FILE WAJIB ---
     const wajibFiles = [
       "ktp",
       "kk",
@@ -1449,57 +1565,74 @@ export default function Step4({ data, setData, back, next }) {
       }
     });
 
-    // --- VALIDASI TEKS ---
     const validLokasi = (text) => {
       if (!text) return false;
       const t = text.trim();
       if (t.length < 5) return false;
 
-      // Deteksi koordinat decimal: -?DDD.DDDD, -?DDD.DDDD (contoh: 0.519822, 101.438505)
       const coordRe = /-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+/;
-
-      // Kata kunci alamat / landmark / singkatan umum
       const keywords = [
-        'jalan', 'jl', 'jl\\.', 'depan', 'seberang', 'sebelah', 'di depan', 'dekat',
-        'simpang', 'persimpangan', 'plaza', 'mal', 'masjid', 'halte', 'ruko', 'stasiun',
-        'terminal', 'rumah sakit', 'rs', 'puskesmas', 'minimarket', 'toko', 'bank',
-        'kelurahan', 'kel\\.', 'kecamatan', 'kec\\.', 'kota', 'rt', 'rw'
+        "jalan",
+        "jl",
+        "jl\\.",
+        "depan",
+        "seberang",
+        "sebelah",
+        "di depan",
+        "dekat",
+        "simpang",
+        "persimpangan",
+        "plaza",
+        "mal",
+        "masjid",
+        "halte",
+        "ruko",
+        "stasiun",
+        "terminal",
+        "rumah sakit",
+        "rs",
+        "puskesmas",
+        "minimarket",
+        "toko",
+        "bank",
+        "kelurahan",
+        "kel\\.",
+        "kecamatan",
+        "kec\\.",
+        "kota",
+        "rt",
+        "rw",
       ];
-      const keywordRe = new RegExp(`\\b(${keywords.join('|')})\\b`, 'i');
+      const keywordRe = new RegExp(`\\b(${keywords.join("|")})\\b`, "i");
 
-      // Valid jika ada koordinat OR ada kata kunci alamat (dan minimal 3 kata)
       if (coordRe.test(t)) return true;
       if (keywordRe.test(t) && t.split(/\s+/).length >= 3) return true;
-
       return false;
     };
 
-    // Nama Korban
     if (!namaKorban) result.namaKorban = "❌ Belum isi";
     else if (/\b(dr|mr|mrs|ir|s.t|s.kom)\b/i.test(namaKorban))
       result.namaKorban = "❌ Nama korban tidak boleh ada gelar";
     else result.namaKorban = "✅ Nama korban sesuai ketentuan";
 
-    // Alamat Korban
     if (!data.alamatKorban) result.alamatKorban = "❌ Belum isi";
     else if (!validLokasi(data.alamatKorban))
       result.alamatKorban = "❌ Alamat belum cukup detail (tambahkan RT/RW atau area)";
     else result.alamatKorban = "✅ Alamat lengkap";
 
-    // Lokasi Kecelakaan
     if (!tempatKecelakaan) result.tempatKecelakaan = "❌ Belum isi";
     else if (!validLokasi(tempatKecelakaan))
       result.tempatKecelakaan =
         "❌ Lokasi belum cukup detail (tambah nama jalan/area/lokasi terdekat)";
     else result.tempatKecelakaan = "✅ Lokasi lengkap";
 
-    // --- VALIDASI URAIAN & KESIMPULAN GABUNG ---
     const isi = (data.uraian || "").toLowerCase();
-
     const regexPlat = /[a-z]{1,2}\s?\d{3,4}\s?[a-z]{0,3}/i;
-    const regexLokasi = /(jalan|jl.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid)/i;
+    const regexLokasi =
+      /(jalan|jl.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid)/i;
     const regexKendaraan = /(motor|mobil|truk|bus|angkot|sepeda)/i;
-    const regexKronologi = /(menabrak|bertabrakan|terjatuh|terpeleset|terserempet|terlindas|terbentur|diserempet|mendadak|mengerem)/i;
+    const regexKronologi =
+      /(menabrak|bertabrakan|terjatuh|terpeleset|terserempet|terlindas|terbentur|diserempet|mendadak|mengerem)/i;
     const regexKesimpulan = /(terjamin|tidak terjamin|dalam pertanggungan|disarankan)/i;
 
     const uraianCukup =
@@ -1510,630 +1643,17 @@ export default function Step4({ data, setData, back, next }) {
       regexKronologi.test(isi) &&
       regexKesimpulan.test(isi);
 
-    if (!data.uraian)
-      result.uraian = "❌ Belum isi uraian & kesimpulan";
+    if (!data.uraian) result.uraian = "❌ Belum isi uraian & kesimpulan";
     else if (!uraianCukup)
       result.uraian =
         "❌ Uraian & kesimpulan belum lengkap (harus memuat plat, lokasi, kendaraan, kronologi, dan status terjamin/tidak terjamin)";
-    else
-      result.uraian = "✅ Uraian & kesimpulan lengkap & informatif";
+    else result.uraian = "✅ Uraian & kesimpulan lengkap & informatif";
 
-    const finalArray = Object.entries(result).map(([key, status]) => ({
+    return Object.entries(result).map(([key, status]) => ({
       key,
       label: labelMap[key] || key,
       status,
     }));
-
-    console.log("🧩 surveyMDComplete (analisis penuh):", finalArray);
-
-    return finalArray;
-  };
-
-  const openPrintSurveyMD = async () => {
-    try {
-      const vv = await prepareForOutput(data);
-
-      const escapeHtml = (str = "") =>
-        String(str)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-
-      const fmtDate = (d) => {
-        if (!d) return "-";
-        try {
-          const date = new Date(d);
-          return date.toLocaleDateString("id-ID", {
-            day: "2-digit",
-            month: "long",
-            year: "numeric",
-          });
-        } catch {
-          return d;
-        }
-      };
-
-      // helper konversi File ke dataURL
-      const toDataURL = (file) =>
-        new Promise((resolve) => {
-          if (!file) return resolve("");
-          if (typeof file === "string") return resolve(file);
-          if (file.dataURL) return resolve(file.dataURL);
-          if (file.url && file.url.startsWith("data:")) return resolve(file.url);
-          if (file.url) return resolve(file.url); // URL publik
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => resolve("");
-          reader.readAsDataURL(file);
-        });
-
-      const renderFotoCell = async (fotoField) => {
-        if (!fotoField) return "-";
-
-        const files = Array.isArray(fotoField) ? fotoField : [fotoField];
-
-        const pieces = [];
-        for (const f of files) {
-          const src = await toDataURL(f);
-          if (!src) continue;
-
-          // jika ternyata PDF, tampilkan placeholder teks
-          if (src.startsWith("data:application/pdf") || (f?.name || "").endsWith(".pdf")) {
-            pieces.push(
-              `<div style="font-size:10pt;color:#a00;margin:2mm 0">[PDF tidak bisa dipratinjau]</div>`
-            );
-            continue;
-          }
-
-          const isImg = src.startsWith("data:image") || /^https?:/.test(src);
-          if (isImg) {
-            pieces.push(
-              `<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;border:0.3mm solid #000;margin:1mm 0" />`
-            );
-          }
-        }
-
-        return pieces.length ? pieces.join("") : "-";
-      };
-
-      // === buat halaman per lampiran ===
-      const filePages = [];
-      if (data.attachSurvey) {
-        const order = ["mapSS","barcode"];
-        const ordered = [
-          ...order.filter(k => k in data.attachSurvey).map(k => [k, data.attachSurvey[k]]),
-          ...Object.entries(data.attachSurvey).filter(([k]) => !order.includes(k))
-        ];
-        for (const [key, file] of ordered) {
-          if (!file) continue;
-          const files = Array.isArray(file) ? file : [file];
-
-          // 🧩 Tentukan grid & ukuran berdasarkan jumlah file
-          const count = files.length;
-          let cols = 1;
-          let imgWidth = "100%";
-          let imgHeight = "270mm";
-
-          // 🩵 Default scaling per jumlah file
-          if (count === 2) {
-            cols = 2;
-            imgWidth = "48%";
-            imgHeight = "130mm";
-          } else if (count === 3) {
-            cols = 2;
-            imgWidth = "48%";
-            imgHeight = "130mm";
-          } else if (count >= 4) {
-            cols = 3;
-            imgWidth = "31%";
-            imgHeight = "90mm";
-          }
-
-          const imgsHTML = [];
-          for (let i = 0; i < files.length; i++) {
-            const f = files[i];
-            const src = await toDataURL(f);
-            if (!src) continue;
-
-            // Kalau PDF → ubah ke gambar dulu
-            if (
-              src.startsWith("data:application/pdf") ||
-              (f.name && f.name.endsWith(".pdf"))
-            ) {
-              try {
-                const imgs = await pdfToImages(f);
-                imgs.forEach((img, j) => {
-                  imgsHTML.push(`
-                  <img src="${src}" style="width:${imgWidth}; max-height:${imgHeight}; object-fit:contain; border:0.3mm solid #ccc; margin:4mm auto; display:block;"/>
-                `);
-                });
-                continue;
-              } catch (err) {
-                console.error(
-                  "Gagal convert PDF ke gambar:",
-                  f.name || key,
-                  err
-                );
-              }
-            }
-
-            // Kalau gambar biasa
-            const isImage = src.startsWith("data:image");
-            const content = isImage
-              ? `<img src="${src}" style="width:${imgWidth}; height:auto; max-height:${imgHeight}; object-fit:contain; border:0.3mm solid #ccc; margin:2mm"/>`
-              : `<div style="color:red; font-size:11pt">[File tidak dapat ditampilkan]</div>`;
-
-            imgsHTML.push(content);
-          }
-
-          filePages.push(`
-          <div style="text-align:center; margin:10mm 0; page-break-inside: avoid;">
-            <div style="font-weight:bold; margin-bottom:4mm; page-break-before: always;">
-              ${escapeHtml(key)}
-            </div>
-            <div style="
-              display:flex;
-              flex-wrap:wrap;
-              justify-content:center;
-              gap:4mm;
-              page-break-inside: avoid;
-            ">
-              ${imgsHTML.join("")}
-            </div>
-          </div>
-        `);
-        }
-      }
-   
-      const tableRowsParts = [];
-      for (let i = 0; i < (vv.sumbers?.length || 0); i++) {
-        const r = vv.sumbers[i] || {};
-        const fotoCell = await renderFotoCell(r.foto); // ⬅️ ambil foto dari tiap baris
-
-        tableRowsParts.push(`
-          <tr>
-            <td style="text-align:center">${i + 1}</td>
-            <td>${escapeHtml(r.identitas || "")}</td>
-            <td>${fotoCell}</td>
-          </tr>
-        `);
-      }
-      const tableRows = tableRowsParts.join("");
-
-      const petugasSrc = vv.petugasTtd || null;
-
-      const htmlMain = 
-      `<!DOCTYPE html>
-      <html>
-      <head>
-      <meta charset="utf-8"/>
-      <style>
-      @page { size: A4; margin: 12mm; }
-      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin:0; font-family:"Times New Roman", Times, serif; color:#000; }
-      h1 { font-size:18pt; margin:0 0 2mm; text-align:center; }
-      h2 { font-size:12pt; margin:0 0 6mm; text-align:center; }
-      .kv { display:grid; grid-template-columns: 54mm 6mm 1fr; row-gap:2mm; column-gap:2mm; margin-bottom:6mm; font-size:11pt }
-      .box { border:0.3mm solid #000; padding:2.4mm; white-space:pre-wrap; min-height:18mm }
-      table { width:100%; border-collapse:collapse; margin:4mm 0 6mm; font-size:11pt }
-      td,th { border:0.3mm solid #000; padding:2mm 2.4mm; vertical-align:top }
-      .signs { display:grid; grid-template-columns:1fr 1fr; column-gap:28mm; margin-top:10mm }
-      .lbl { margin-bottom: 10mm }
-      .space { height: 28mm }
-      .name { font-weight:bold; text-decoration:underline; }
-      .sign-img{ max-height:28mm; max-width:80mm; display:block; }
-      </style>
-      </head>
-      <body>
-      <h1>LAPORAN HASIL SURVEI</h1>
-      <h2>APLIKASI MOBILE PELAYANAN</h2>
-
-      <div class="kv">
-        <div>No. PL</div><div>:</div><div>${escapeHtml(vv.noPL || "-")}</div>
-        <div>Hari/Tanggal Survei</div><div>:</div><div>${escapeHtml(
-          fmtDate(vv.hariTanggal)
-        )}</div>
-        <div>Petugas Survei</div><div>:</div><div>${escapeHtml(
-          vv.petugas || "-"
-        )}</div>
-        <div>Jenis Survei</div><div>:</div><div>${escapeHtml(
-          vv.jenisSurvei || "-"
-        )}</div>
-        <div>Nama Korban</div><div>:</div><div>${escapeHtml(vv.korban || "-")}</div>
-        <div>No. Berkas</div><div>:</div><div>${escapeHtml(vv.noBerkas || "-")}</div>
-        <div>Alamat Korban</div><div>:</div><div>${escapeHtml(
-          vv.alamatKorban || "-"
-        )}</div>
-        <div>Tempat/Tgl. Kecelakaan</div><div>:</div><div>${escapeHtml(
-          vv.tempatKecelakaan || "-"
-        )} / ${escapeHtml(fmtDate(vv.tglKecelakaan))}</div>
-        <div>Kesesuaian Hubungan AW</div><div>:</div><div>${
-          vv.hubunganSesuai === ""
-            ? "-"
-            : vv.hubunganSesuai
-            ? "Sesuai"
-            : "Tidak Sesuai"
-        }</div>
-      </div>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Sumber Informasi :</div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:10mm">No</th>
-            <th>Identitas/Detil Sumber Informasi dan Metode Perolehan</th>
-            <th style="width:40mm">Foto</th>
-          </tr>
-        </thead>
-        <tbody>${
-          tableRows ||
-          '<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>'
-        }</tbody>
-      </table>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Uraian & Kesimpulan Hasil Survei :</div>
-      <div class="box">${escapeHtml(vv.uraian || "")}</div>
-
-      <p style="margin:6mm 0 10mm;font-size:11pt">
-        Demikian laporan hasil survei ini dibuat dengan sebenarnya sesuai dengan informasi yang diperoleh.
-      </p>
-
-      <div class="signs">
-        <div>
-          <div class="lbl">Mengetahui,</div>
-          <div class="space"></div>
-          <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
-          <div>${escapeHtml("Kepala Bagian Operasional")}</div>
-        </div>
-        <div>
-          <div class="lbl">Petugas Survei,</div>
-          <div class="space">${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : ""}</div>
-          <div class="name">${escapeHtml(
-            vv.petugas || "........................................"
-          )}</div>
-          <div>${escapeHtml(vv.petugasJabatan || "")}</div>
-        </div>
-      </div>
-
-      ${filePages.join("")}
-
-      </body></html>`;
-    
-      const safeHtml =
-        typeof htmlMain === "string" ? htmlMain : String(htmlMain || "");
-      const blob = new Blob([safeHtml], { type: "text/html" });
-      if (!blob) throw new Error("Blob tidak terbentuk");
-      const url = window.URL.createObjectURL(blob);
-
-      const safeName = (vv.korban || "Anon")
-        .replace(/\s+/g, "_")
-        .replace(/[^\w_]/g, "");
-
-      setData((prev) => ({
-        ...prev,
-        hasilFormFile: {
-          name: `LaporanSurvey_${safeName}.html`,
-          dataURL: url,
-          label: "Hasil Formulir Survei Ahli Waris (MD)",
-        },
-      }));
-
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = url;
-      document.body.appendChild(iframe);
-
-      iframe.onload = () => {
-        try {
-          iframe.contentDocument.title = `LaporanSurvey_${safeName}`;
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-        } catch (err) {
-          console.error("Gagal print:", err);
-        } finally {
-          setTimeout(() => document.body.removeChild(iframe), 2000);
-        }
-      };
-
-      setHasDownloadedPDF(true);
-      setData((prev) => ({ ...prev, sudahDownloadPDF: true }));
-    } catch (err) {
-      console.error("Gagal openPrintSurveyMD:", err);
-    }
-  };
-
-  // 🖨️ Fungsi Download / Cetak HTML (Versi Survey - Luka-Luka)
-  const openPrintSurveyLL = async () => {
-    try {
-      const vv = await prepareForOutput(data);
-      const fotoListSafe = typeof fotoList !== "undefined" ? fotoList : [];
-
-      const escapeHtml = (str = "") =>
-        String(str)
-          .replace(/&/g, "&amp;")
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")
-          .replace(/"/g, "&quot;")
-          .replace(/'/g, "&#39;");
-
-      const fotoSources =
-        vv.fotoSurvey && vv.fotoSurvey.length
-          ? vv.fotoSurvey
-          : data.attachSurvey?.fotoSurvey && data.attachSurvey.fotoSurvey.length
-          ? data.attachSurvey.fotoSurvey
-          : data.fotoSurveyList && data.fotoSurveyList.length
-          ? data.fotoSurveyList
-          : [];
-
-      console.log("🖼️ fotoSources:", fotoSources);
-
-      const convertToDataURL = (file) =>
-        new Promise((resolve) => {
-          if (!file) return resolve(null);
-          const reader = new FileReader();
-          reader.onload = (e) => resolve(e.target.result);
-          reader.onerror = () => resolve(null);
-          reader.readAsDataURL(file);
-        });
-
-      const fotos = await Promise.all(
-        (fotoSources || []).map(async (f) => {
-          if (typeof f === "string") return { url: f, name: "foto" };
-          if (f instanceof Blob) return { url: await convertToDataURL(f), name: f.name || "foto" };
-          let url = f?.url || f?.dataURL;
-          if (!url && f?.file instanceof Blob) url = await convertToDataURL(f.file);
-          return { ...f, url, name: f?.name || f?.file?.name || "foto" };
-        })
-      );
-
-      console.log("🖼️ fotos setelah base64:", fotos);
-
-      const imgsHTML = fotos
-        .filter((x) => !!x.url)
-        .map(
-          (x) =>
-            `<img src="${x.url}" alt="${escapeHtml(
-              x.name
-            )}" style="max-width:45%; margin:2mm; page-break-inside: avoid;" />`
-        )
-        .join("");
-
-      console.log("🧩 fotoListSafe:", fotoListSafe);
-      console.log("🖼️ fotoSources:", fotoSources);
-
-      const fmtDate = (d) => {
-        if (!d) return "-";
-        try {
-          const date = new Date(d);
-          return date.toLocaleDateString("id-ID", {
-            day: "2-digit",
-            month: "long",
-            year: "numeric",
-          });
-        } catch {
-          return d;
-        }
-      };
-
-      const toSrcList = async (fotoField) => {
-        if (!fotoField) return [];
-        const list = Array.isArray(fotoField) ? fotoField : [fotoField];
-
-        const resolveOne = async (item) => {
-          // string dataURL atau URL publik
-          if (typeof item === "string") return item;
-          // objek dengan dataURL/url
-          if (item?.dataURL) return item.dataURL;
-          if (item?.url) return item.url;
-          // File/Blob
-          if (item instanceof Blob || item?.file instanceof Blob) {
-            const blob = item instanceof Blob ? item : item.file;
-            return await convertToDataURL(blob);
-          }
-          return "";
-        };
-
-        const results = await Promise.all(list.map(resolveOne));
-        // filter kosong & PDF (kita skip preview PDF di sel; tampilkan label teks)
-        return results.filter(Boolean);
-      };
-
-      const renderFotoCell = async (fotoField) => {
-        const srcs = await toSrcList(fotoField);
-        if (!srcs.length) return "-";
-
-        const pieces = srcs.map((src) => {
-          const isPdf =
-            src.startsWith("data:application/pdf") ||
-            /\.pdf(\?|$)/i.test(src);
-          if (isPdf) {
-            return `<div style="font-size:10pt;color:#a00;margin:2mm 0">[PDF tidak bisa dipratinjau]</div>`;
-          }
-          return `<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;border:0.3mm solid #000;margin:1mm 0" />`;
-        });
-
-        return pieces.join("");
-      };
-
-      const tableRowsParts = [];
-        for (let i = 0; i < (vv.sumbers?.length || 0); i++) {
-          const r = vv.sumbers[i] || {};
-          const fotoCell = await renderFotoCell(r.foto); 
-          tableRowsParts.push(`
-            <tr>
-              <td style="text-align:center">${i + 1}</td>
-              <td>${escapeHtml(r.identitas || "")}</td>
-              <td>${fotoCell}</td>
-            </tr>
-          `);
-        }
-        const tableRows =
-          tableRowsParts.join("") ||
-          '<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>';
-
-        const petugasSrc = vv.petugasTtd || null;
-      
-      const mapSrc = data.attachSurvey?.mapSS?.url || "";
-      const qrSrc  = data.attachSurvey?.barcode?.url || "";
-
-      const lampiranHTML = `
-        <div style="page-break-before:always"></div>
-        <h1 style="text-align:left;font-size:16pt;margin:0 0 6mm">Lampiran</h1>
-        <div style="display:grid;grid-template-columns:2fr 1.1fr;gap:6mm;align-items:start">
-          <div>
-            ${mapSrc ? `<img src="${mapSrc}" style="width:100%;height:auto;border:0.3mm solid #000;border-radius:2mm" />` : `<div style="height:80mm;border:0.3mm solid #000;border-radius:2mm"></div>`}
-          </div>
-          <div style="display:grid;grid-template-rows:auto auto;row-gap:6mm">
-            <div>
-              ${fotos?.[0]?.url ? `<img src="${fotos[0].url}" style="width:100%;height:auto;border:0.3mm solid #000;border-radius:2mm" />` : `<div style="height:46mm;border:0.3mm solid #000;border-radius:2mm"></div>`}
-            </div>
-            <div style="justify-self:center">
-              ${qrSrc ? `<img src="${qrSrc}" style="width:42mm;height:42mm;border:0.3mm solid #000;border-radius:2mm;padding:2mm" />` : `<div style="width:42mm;height:42mm;border:0.3mm solid #000;border-radius:2mm"></div>`}
-            </div>
-          </div>
-        </div>
-        ${fotos.length > 1 ? `
-          <div style="margin-top:6mm;display:flex;flex-wrap:wrap;gap:4mm">
-            ${fotos.slice(1).map(x => `<img src="${x.url}" style="height:38mm;border:0.3mm solid #000;border-radius:2mm" />`).join("")}
-          </div>` : ""}
-      `;
-
-      const srcdoc = 
-      `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-      <style>
-      @page { size: A4; margin: 12mm; }
-      body{ -webkit-print-color-adjust: exact; print-color-adjust: exact; margin:0;
-            font-family: "Times New Roman", Times, serif; color:#000; }
-      h1{ font-size: 18pt; margin:0 0 2mm; text-align:center; }
-      h2{ font-size: 12pt; margin:0 0 6mm; text-align:center; }
-      .kv{ display:grid; grid-template-columns: 54mm 6mm 1fr; row-gap:2mm; column-gap:2mm; margin-bottom:6mm; font-size:11pt }
-      .box{ border:0.3mm solid #000; padding:2.4mm; white-space:pre-wrap; min-height:18mm }
-      table{ width:100%; border-collapse:collapse; margin:4mm 0 6mm; font-size:11pt }
-      td,th{ border:0.3mm solid #000; padding:2mm 2.4mm; vertical-align:top }
-      .signs{ display:grid; grid-template-columns:1fr 1fr; column-gap:28mm; margin-top:10mm }
-      .lbl{ margin-bottom: 10mm }
-      .space{ height: 28mm }
-      .sign-img{ max-height: 28mm }
-      .name{ font-weight:bold; text-decoration:underline; }
-      </style></head><body>
-      <h1>LAPORAN HASIL SURVEI</h1>
-      <h2>APLIKASI MOBILE PELAYANAN</h2>
-
-      <div class="kv">
-        <div>No. PL</div><div>:</div><div>${escapeHtml(vv.noPL || "-")}</div>
-        <div>Hari/Tanggal Survei</div><div>:</div><div>${escapeHtml(
-          fmtDate(vv.hariTanggal)
-        )}</div>
-        <div>Petugas Survei</div><div>:</div><div>${escapeHtml(
-          vv.petugas || "-"
-        )}</div>
-        <div>Jenis Survei</div><div>:</div><div>${escapeHtml(
-          vv.jenisSurvei || "-"
-        )}</div>
-
-        <div>Nama Korban</div><div>:</div><div>${escapeHtml(
-          vv.korban || "-"
-        )}</div>
-        <div>No. Berkas</div><div>:</div><div>${escapeHtml(
-          vv.noBerkas || "-"
-        )}</div>
-        <div>Alamat Korban</div><div>:</div><div>${escapeHtml(
-          vv.alamatKorban || "-"
-        )}</div>
-        <div>Tempat/Tgl. Kecelakaan</div><div>:</div><div>${escapeHtml(
-          vv.tempatKecelakaan || "-"
-        )} / ${escapeHtml(fmtDate(vv.tglKecelakaan))}</div>
-        <div>Kesesuaian Hubungan AW</div><div>:</div><div>${
-          vv.hubunganSesuai === ""
-            ? "-"
-            : vv.hubunganSesuai
-            ? "Sesuai"
-            : "Tidak Sesuai"
-        }</div>
-      </div>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Sumber Informasi :</div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:10mm">No</th>
-            <th>Identitas/Detil Sumber Informasi dan Metode Perolehan</th>
-            <th style="width:40mm">Foto</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Uraian & Kesimpulan Hasil Survei :</div>
-      <div class="box">${escapeHtml(vv.uraian || "")}</div>
-
-      <p style="margin:6mm 0 10mm;font-size:11pt">
-        Demikian laporan hasil survei ini dibuat dengan sebenarnya sesuai dengan informasi yang diperoleh.
-      </p>
-
-      <div class="signs">
-        <div>
-          <div class="lbl">Mengetahui,</div>
-          <div class="space"></div>
-          <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
-          <div>${escapeHtml("Kepala Bagian Operasional")}</div>
-        </div>
-        <div>
-          <div class="lbl">Petugas Survei,</div>
-          <div class="space">${petugasSrc ? `<img class="sign-img" src="${petugasSrc}" />` : ""}</div>
-          <div class="name">${escapeHtml(
-            vv.petugas || "........................................"
-          )}</div>
-          <div>${escapeHtml(vv.petugasJabatan || "")}</div>
-        </div>
-      </div>
-
-      ${lampiranHTML}
-
-      </body></html>`;
-
-      const safeName = (vv.korban || "Anon")
-        .replace(/\s+/g, "_")
-        .replace(/[^\w_]/g, "");
-
-      const blob = new Blob([srcdoc], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-
-      setData((prev) => ({
-        ...prev,
-        hasilFormFile: {
-          name: `LaporanSurvey_${safeName}.html`,
-          dataURL: url,
-          label: "Hasil Formulir Survei Ahli Waris (LL)",
-        },
-      }));
-
-      const iframe = document.createElement("iframe");
-      iframe.style.display = "none";
-      iframe.src = url;
-      document.body.appendChild(iframe);
-
-      iframe.onload = () => {
-        try {
-          iframe.contentDocument.title = `LaporanSurvey_${safeName}`;
-          iframe.contentWindow.focus();
-          iframe.contentWindow.print();
-        } catch (err) {
-          console.error("Gagal print:", err);
-        } finally {
-          setTimeout(() => {
-            document.body.removeChild(iframe);
-            try { URL.revokeObjectURL(url); } catch {}
-          }, 2000);
-        }
-      };
-
-      setHasDownloadedPDF(true);
-      setData((prev) => ({ ...prev, sudahDownloadPDF: true }));
-    } catch (err) {
-      console.error("Gagal openPrintSurveyLL:", err);
-    }
   };
 
   function surveyLLCompleteDetails(data) {
@@ -2141,26 +1661,37 @@ export default function Step4({ data, setData, back, next }) {
     const v = data.v || data.form || data.survey || data.korban || data || {};
 
     const namaKorban =
-      v.namaKorban || v.korbanNama || v.nama || data.namaKorban || data.korbanNama ||
-      data.korban?.nama || data.korban?.namaKorban || data.form?.namaKorban ||
-      data.survey?.namaKorban || data.v?.namaKorban || data.korban || "";
+      v.namaKorban ||
+      v.korbanNama ||
+      v.nama ||
+      data.namaKorban ||
+      data.korbanNama ||
+      data.korban?.nama ||
+      data.korban?.namaKorban ||
+      data.form?.namaKorban ||
+      data.survey?.namaKorban ||
+      data.v?.namaKorban ||
+      data.korban ||
+      "";
 
     const tempatKecelakaan =
-      v.tempatKecelakaan || data.tempatKecelakaan || data.lokasiKecelakaan || data.kecelakaan?.tempat || "";
+      v.tempatKecelakaan ||
+      data.tempatKecelakaan ||
+      data.lokasiKecelakaan ||
+      data.kecelakaan?.tempat ||
+      "";
 
     const att = data.attachSurvey || {};
     const isFilled = (val) => !!(val && String(val).trim() !== "");
 
-    // ===== regex yang lebih lengkap + helper cek =====
     const REGEX = {
-      // plat: 1–2 huruf + 3–4 angka + 0–3 huruf (contoh: BM 5621 PQ)
       plat: /(?:^|\b)[a-z]{1,2}\s?\d{3,4}\s?[a-z]{0,3}(?=\b|[^a-z0-9])/i,
-      // lokasi: tambah RS/RSUD dkk
-      lokasi: /(jalan|jl\.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid|rsud|rumah sakit|terminal|stasiun)/i,
-      // kendaraan: tambah brand umum biar tetap lolos
-      kendaraan: /(motor|mobil|truk|bus|angkot|sepeda|pick ?up|suv|minibus|suzuki|honda|yamaha|daihatsu|toyota|mitsubishi|isuzu)/i,
-      // kronologi: tambahkan “diserempet”, “pindah jalur”, dll
-      kronologi: /(menabrak|bertabrakan|tertabrak|menyerempet|diserempet|terserempet|menyenggol|tersenggol|terjatuh|terpeleset|tergelincir|terlindas|terbentur|rem mendadak|melawan arus|ban pecah|pindah jalur|memotong jalur|mendahului)/i,
+      lokasi:
+        /(jalan|jl\.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid|rsud|rumah sakit|terminal|stasiun)/i,
+      kendaraan:
+        /(motor|mobil|truk|bus|angkot|sepeda|pick ?up|suv|minibus|suzuki|honda|yamaha|daihatsu|toyota|mitsubishi|isuzu)/i,
+      kronologi:
+        /(menabrak|bertabrakan|tertabrak|menyerempet|diserempet|terserempet|menyenggol|tersenggol|terjatuh|terpeleset|tergelincir|terlindas|terbentur|rem mendadak|melawan arus|ban pecah|pindah jalur|memotong jalur|mendahului)/i,
       kesimpulan: /(terjamin|tidak terjamin|dalam pertanggungan|disarankan)/i,
     };
 
@@ -2174,21 +1705,46 @@ export default function Step4({ data, setData, back, next }) {
         kronologi: REGEX.kronologi.test(isi),
         kesimpulan: REGEX.kesimpulan.test(isi),
       };
-      console.log("🔎 LL.cekUraian:", match, "\nTeks:", raw);
       return { ok: Object.values(match).every(Boolean), detail: match };
     };
 
-    // ===== validator lokasi umum =====
     const validLokasi = (text) => {
       if (!text) return false;
       const t = text.trim();
       if (t.length < 5) return false;
       const coordRe = /-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+/;
       const keywords = [
-        "jalan","jl","jl\\.","depan","seberang","sebelah","di depan","dekat",
-        "simpang","persimpangan","plaza","mal","masjid","halte","ruko","stasiun",
-        "terminal","rumah sakit","rs","rsud","puskesmas","minimarket","toko","bank",
-        "kelurahan","kel\\.","kecamatan","kec\\.","kota","rt","rw"
+        "jalan",
+        "jl",
+        "jl\\.",
+        "depan",
+        "seberang",
+        "sebelah",
+        "di depan",
+        "dekat",
+        "simpang",
+        "persimpangan",
+        "plaza",
+        "mal",
+        "masjid",
+        "halte",
+        "ruko",
+        "stasiun",
+        "terminal",
+        "rumah sakit",
+        "rs",
+        "rsud",
+        "puskesmas",
+        "minimarket",
+        "toko",
+        "bank",
+        "kelurahan",
+        "kel\\.",
+        "kecamatan",
+        "kec\\.",
+        "kota",
+        "rt",
+        "rw",
       ];
       const keywordRe = new RegExp(`\\b(${keywords.join("|")})\\b`, "i");
       if (coordRe.test(t)) return true;
@@ -2196,10 +1752,8 @@ export default function Step4({ data, setData, back, next }) {
       return false;
     };
 
-    // ===== CEK URAIAN =====
     const { ok: uraianCukup, detail } = cekUraianCukup(data.uraian);
 
-    // ===== bangun hasil =====
     const result = {};
     result.noPL = isFilled(data.noPL) ? "✅ No. PL terisi" : "❌ Belum isi";
 
@@ -2215,27 +1769,28 @@ export default function Step4({ data, setData, back, next }) {
 
     if (!tempatKecelakaan) result.tempatKecelakaan = "❌ Belum isi";
     else if (!validLokasi(tempatKecelakaan))
-      result.tempatKecelakaan = "❌ Lokasi belum cukup detail (tambah nama jalan/area/lokasi terdekat)";
+      result.tempatKecelakaan =
+        "❌ Lokasi belum cukup detail (tambah nama jalan/area/lokasi terdekat)";
     else result.tempatKecelakaan = "✅ Lokasi lengkap";
 
-    if (!data.uraian) {
-      result.uraian = "❌ Belum isi uraian & kesimpulan";
-    } else if (!uraianCukup) {
+    if (!data.uraian) result.uraian = "❌ Belum isi uraian & kesimpulan";
+    else if (!uraianCukup) {
       const kurang = Object.entries(detail)
         .filter(([, v]) => !v)
-        .map(([k]) => ({
-          panjang: "panjang minimal",
-          plat: "plat nomor",
-          lokasi: "lokasi",
-          kendaraan: "jenis kendaraan",
-          kronologi: "kronologi",
-          kesimpulan: "status terjamin/tidak",
-        }[k] || k))
+        .map(
+          ([k]) =>
+            ({
+              panjang: "panjang minimal",
+              plat: "plat nomor",
+              lokasi: "lokasi",
+              kendaraan: "jenis kendaraan",
+              kronologi: "kronologi",
+              kesimpulan: "status terjamin/tidak",
+            }[k] || k)
+        )
         .join(", ");
       result.uraian = `❌ Uraian & kesimpulan belum lengkap (kurang: ${kurang})`;
-    } else {
-      result.uraian = "✅ Uraian & kesimpulan lengkap & informatif";
-    }
+    } else result.uraian = "✅ Uraian & kesimpulan lengkap & informatif";
 
     const listFoto =
       Array.isArray(att.fotoSurvey) && att.fotoSurvey.length > 0
@@ -2243,9 +1798,10 @@ export default function Step4({ data, setData, back, next }) {
         : Array.isArray(data.fotoSurveyList)
         ? data.fotoSurveyList
         : [];
+
     result.fotoSurvey = listFoto.length > 0 ? "✅ File sudah terunggah" : "❌ Belum unggah";
 
-    const finalArray = Object.entries(result).map(([key, status]) => ({
+    return Object.entries(result).map(([key, status]) => ({
       key,
       label: {
         noPL: "No. PL",
@@ -2257,74 +1813,378 @@ export default function Step4({ data, setData, back, next }) {
       }[key] || key,
       status,
     }));
-
-    console.log("🧩 surveyLLCompleteDetails:", finalArray);
-    return finalArray;
   }
 
-  useEffect(() => {
-    // expose ke global biar halaman lain bisa panggil
-    window.__reportPrinters = {
-      ll: () => openPrintSurveyLL(),
-      md: () => openPrintSurveyMD(),
-      rs: () => openPrint(),   // kunjungan RS
-    };
-
-    // bersihkan saat unmount
-    return () => {
-      try { delete window.__reportPrinters; } catch {}
-    };
-  }, [openPrintSurveyLL, openPrintSurveyMD, openPrint]);
-
-  function surveyLLComplete(data) {
-    const arr = surveyLLCompleteDetails(data);
-    return Array.isArray(arr) && arr.length > 0 && arr.every((x) => String(x.status).startsWith("✅"));
-  }
-
-  const handleKirim = async () => {
+  // ===============================
+  // PRINT Survey MD & LL (tetap punyamu)
+  // ===============================
+  const openPrintSurveyMD = useCallback(async () => {
     try {
-      if (data.isSurvey) {
-        // Untuk SURVEY gunakan dokumenOk (dokumenOkMD/LL sudah dihitung di atas)
-        if (!dokumenOk) {
-          toast.error("Lengkapi kelengkapan dokumen survei dulu ya 🙏");
-          return;
-        }
-      } else {
-        // Untuk KUNJUNGAN RS gunakan hasil ML (semuaBenar)
-        if (!semuaBenar) {
-          toast.error("Lengkapi hasil validasi Machine Learning dulu ya 🙏");
-          return;
+      const vv = await prepareForOutput(data);
+
+      const filePages = [];
+      if (data.attachSurvey) {
+        const order = ["mapSS", "barcode"];
+        const ordered = [
+          ...order.filter((k) => k in data.attachSurvey).map((k) => [k, data.attachSurvey[k]]),
+          ...Object.entries(data.attachSurvey).filter(([k]) => !order.includes(k)),
+        ];
+
+        const skipKeyRegex = /ttd|tanda\s*tangan|signature/i;
+
+        for (const [key, fileGroup] of ordered) {
+          if (!fileGroup) continue;
+          if (skipKeyRegex.test(key)) continue;
+
+          const files = Array.isArray(fileGroup) ? fileGroup : [fileGroup];
+          for (const f of files) {
+            const fname = (f?.name || f?.filename || "").toLowerCase();
+            if (skipKeyRegex.test(fname)) continue;
+
+            const src = await toDataURL(f);
+            if (!src) continue;
+
+            if (src.startsWith("data:application/pdf") || (f?.name && f.name.endsWith(".pdf"))) {
+              try {
+                const imgs = await pdfToImages(f);
+                imgs.forEach((imgSrc) => {
+                  filePages.push(`
+                    <div class="lampiran-page">
+                      <img src="${imgSrc}" class="lampiran-img" />
+                    </div>
+                  `);
+                });
+              } catch {
+                filePages.push(`
+                  <div class="lampiran-page">
+                    <div style="color:red;font-size:11pt;text-align:center">
+                      [PDF tidak dapat ditampilkan]
+                    </div>
+                  </div>
+                `);
+              }
+              continue;
+            }
+
+            const isImage = src.startsWith("data:image") || /^https?:/.test(src);
+            filePages.push(`
+              <div class="lampiran-page">
+                ${
+                  isImage
+                    ? `<img src="${src}" class="lampiran-img" />`
+                    : `<div style="color:red; font-size:11pt;text-align:center">[File tidak dapat ditampilkan]</div>`
+                }
+              </div>
+            `);
+          }
         }
       }
 
-      // Simpan ke Supabase
-      const savedId = data.isSurvey
-        ? await saveSurveyToSupabase(data)      
-        : await saveKunjunganToSupabase(data);
+      const renderFotoCell = async (fotoField) => {
+        if (!fotoField) return "";
+        const files = Array.isArray(fotoField) ? fotoField : [fotoField];
+        const pieces = [];
+        for (const f of files) {
+          const src = await toDataURL(f);
+          if (!src) continue;
+          if (src.startsWith("data:application/pdf")) {
+            pieces.push(`<div style="font-size:10pt;color:#a00;">[PDF tidak bisa dipratinjau]</div>`);
+            continue;
+          }
+          const isImg = src.startsWith("data:image") || /^https?:/.test(src);
+          if (isImg)
+            pieces.push(
+              `<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;" />`
+            );
+        }
+        return pieces.join("");
+      };
+
+      const rows = [];
+      for (let i = 0; i < (vv.sumbers?.length || 0); i++) {
+        const r = vv.sumbers[i] || {};
+        const fotoCell = await renderFotoCell(r.foto);
+        rows.push(`
+          <tr>
+            <td style="text-align:center">${i + 1}</td>
+            <td>${r.identitas || ""}</td>
+            <td>${fotoCell}</td>
+          </tr>
+        `);
+      }
+
+      const htmlMain = buildSurveyHtmlClient(vv, {
+        filePages,
+        tableRows: rows.join(""),
+      });
+
+      const safeName = (vv.korban || "Anon")
+        .replace(/\s+/g, "_")
+        .replace(/[^\w_]/g, "");
+
+      const blob = new Blob([htmlMain], { type: "text/html" });
+      const url = window.URL.createObjectURL(blob);
+
+      setData((prev) => ({
+        ...prev,
+        hasilFormFile: {
+          name: `LaporanSurvey_${safeName}.html`,
+          dataURL: url,
+          label: "Hasil Formulir Survei Ahli Waris (MD)",
+        },
+        sudahDownloadPDF: true,
+      }));
+
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+
+      iframe.onload = () => {
+        try {
+          iframe.contentDocument.title = `LaporanSurvey_${safeName}`;
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } finally {
+          setTimeout(() => document.body.removeChild(iframe), 2000);
+        }
+      };
+
+      setHasDownloadedPDF(true);
+    } catch (err) {
+      console.error("Gagal openPrintSurveyMD:", err);
+    }
+  }, [data, prepareForOutput, setData]);
+
+  const openPrintSurveyLL = useCallback(async () => {
+    try {
+      const vv = await prepareForOutput(data);
+
+      const attachSurvey = data.attachSurvey || {};
+      const filePages = [];
+
+      const onlyLLKeys = ["mapSS", "barcode", "fotoSurvey"];
+
+      const pushFiles = async (fileGroup) => {
+        if (!fileGroup) return;
+        const files = Array.isArray(fileGroup) ? fileGroup : [fileGroup];
+
+        for (const f of files) {
+          if (!f) continue;
+          const src = await toDataURL(f);
+          if (!src) continue;
+
+          const fname = (f?.name || f?.filename || "").toLowerCase();
+
+          if (src.startsWith("data:application/pdf") || fname.endsWith(".pdf")) {
+            filePages.push(`
+              <div class="lampiran-page">
+                <div style="font-size:10pt;color:#a00;text-align:center">
+                  [PDF tidak bisa dipratinjau]
+                </div>
+              </div>
+            `);
+            continue;
+          }
+
+          const isImg =
+            src.startsWith("data:image") ||
+            src.startsWith("blob:") ||
+            /^https?:/.test(src);
+
+          filePages.push(`
+            <div class="lampiran-page">
+              ${
+                isImg
+                  ? `<img src="${src}" class="lampiran-img" />`
+                  : `<div style="font-size:10pt;color:#a00;text-align:center">[File tidak dapat ditampilkan]</div>`
+              }
+            </div>
+          `);
+        }
+      };
+
+      for (const key of onlyLLKeys) {
+        if (key === "fotoSurvey") {
+          const fotoSurveyList =
+            Array.isArray(attachSurvey.fotoSurvey) && attachSurvey.fotoSurvey.length
+              ? attachSurvey.fotoSurvey
+              : Array.isArray(data.fotoSurveyList)
+              ? data.fotoSurveyList
+              : [];
+          await pushFiles(fotoSurveyList);
+        } else {
+          await pushFiles(attachSurvey[key]);
+        }
+      }
+
+      const renderFotoCell = async (fotoField) => {
+        if (!fotoField) return "";
+        const files = Array.isArray(fotoField) ? fotoField : [fotoField];
+        const pieces = [];
+        for (const f of files) {
+          const src = await toDataURL(f);
+          if (!src) continue;
+          if (src.startsWith("data:application/pdf")) {
+            pieces.push(`<div style="font-size:10pt;color:#a00;">[PDF tidak bisa dipratinjau]</div>`);
+            continue;
+          }
+          const isImg = src.startsWith("data:image") || /^https?:/.test(src);
+          if (isImg)
+            pieces.push(
+              `<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;" />`
+            );
+        }
+        return pieces.join("");
+      };
+
+      const rows = [];
+      for (let i = 0; i < (vv.sumbers?.length || 0); i++) {
+        const r = vv.sumbers[i] || {};
+        const fotoCell = await renderFotoCell(r.foto);
+        rows.push(`
+          <tr>
+            <td style="text-align:center">${i + 1}</td>
+            <td>${r.identitas || ""}</td>
+            <td>${fotoCell}</td>
+          </tr>
+        `);
+      }
+
+      const htmlMain = buildSurveyHtmlClient(vv, {
+        filePages,
+        tableRows: rows.join(""),
+      });
+
+      const safeName = (vv.korban || "Anon")
+        .replace(/\s+/g, "_")
+        .replace(/[^\w_]/g, "");
+
+      const blob = new Blob([htmlMain], { type: "text/html" });
+      const url = window.URL.createObjectURL(blob);
+
+      setData((prev) => ({
+        ...prev,
+        hasilFormFile: {
+          name: `LaporanSurvey_${safeName}.html`,
+          dataURL: url,
+          label: "Hasil Formulir Survei Ahli Waris (LL)",
+        },
+        sudahDownloadPDF: true,
+      }));
+
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = url;
+      document.body.appendChild(iframe);
+
+      iframe.onload = () => {
+        try {
+          iframe.contentDocument.title = `LaporanSurvey_${safeName}`;
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } finally {
+          setTimeout(() => document.body.removeChild(iframe), 2000);
+        }
+      };
+
+      setHasDownloadedPDF(true);
+    } catch (err) {
+      console.error("Gagal openPrintSurveyLL:", err);
+    }
+  }, [data, prepareForOutput, setData]);
+
+  // expose printer biar step lain bisa panggil
+  useEffect(() => {
+    window.__reportPrinters = {
+      ll: () => openPrintSurveyLL(),
+      md: () => openPrintSurveyMD(),
+      rs: () => openPrint(),
+    };
+    return () => {
+      try {
+        delete window.__reportPrinters;
+      } catch {}
+    };
+  }, [openPrintSurveyLL, openPrintSurveyMD, openPrint]);
+
+  // ===============================
+  // HANDLE KIRIM (✅ 1x aja)
+  // ===============================
+  const handleKirim = async () => {
+    if (isSavingRef.current || hasManualSavedRef.current) return;
+
+    // ✅ satu rule buat Survey + RS
+    if (!validSemua) {
+      toast.error(
+        data.isSurvey
+          ? "Lengkapi kelengkapan dokumen survei dulu ya 🙏"
+          : "Lengkapi hasil validasi Machine Learning dulu ya 🙏"
+      );
+      return;
+    }
+
+    try {
+      isSavingRef.current = true;
+
+      let savedId = data.formSavedId;
+
+      if (!savedId) {
+        savedId = data.isSurvey
+          ? await saveSurveyToSupabase(data, recordIdRef.current)
+          : await saveKunjunganToSupabase(data, recordIdRef.current);
+      }
+
       if (savedId) {
+        hasManualSavedRef.current = true;
+
         setData((prev) => ({
           ...prev,
           formSavedId: savedId,
           tersimpan: true,
         }));
 
-        toast.success("✅ Data berhasil disimpan");
+        if (data.isSurvey && savedId?.id) {
+          await createDraftWarisIfMD(savedId, data);
+        }
 
         next();
       }
     } catch (err) {
       console.error("❌ Error saat kirim data:", err);
       toast.error("Gagal menyimpan data ke database.");
+    } finally {
+      isSavingRef.current = false;
     }
   };
 
-  const disabledKirim = data.isSurvey
-   ? (String(data.sifatCidera).toUpperCase().startsWith("MD") ? !dokumenOkMD : !dokumenOkLL)
-   : !semuaBenar;
+  const disabledKirim = !validSemua;
 
-  // ===============================================
-  // RENDER
-  // ===============================================
+  // ===============================
+  // 🎀 KAWAII BUTTON STYLE
+  // ===============================
+  const kawaiiBtnStyle = {
+    padding: "10px 14px",
+    borderRadius: 999,
+    border: "1.5px solid #ffd3e6",
+    background:
+      "linear-gradient(135deg, #fff0f7 0%, #f3f7ff 45%, #e9ffe9 100%)",
+    color: "#7a2e5a",
+    fontWeight: 800,
+    letterSpacing: 0.3,
+    boxShadow: "0 6px 14px rgba(255, 182, 220, .45)",
+    cursor: "pointer",
+    transition: "all .18s ease",
+  };
+
+  const kawaiiBtnHover = {
+    transform: "translateY(-1px) scale(1.02)",
+    boxShadow: "0 10px 18px rgba(255, 182, 220, .6)",
+  };
+
+  // ===============================
+  // RENDER UI
+  // ===============================
   return (
     <div className="container">
       <h2 className="section-title">Validasi Kelengkapan Dokumen</h2>
@@ -2332,10 +2192,7 @@ export default function Step4({ data, setData, back, next }) {
       <div style={{ display: "grid", gap: 10 }}>
         <SummaryRow label="Petugas" value={data.petugas || "-"} />
         <SummaryRow label="Korban" value={data.korban || "-"} />
-        <SummaryRow
-          label="Tanggal Kecelakaan"
-          value={data.tglKecelakaan || "-"}
-        />
+        <SummaryRow label="Tanggal Kecelakaan" value={data.tglKecelakaan || "-"} />
         <SummaryRow label="Template" value={data.template || "-"} />
         <SummaryRow
           label="Catatan Kebutuhan"
@@ -2351,13 +2208,20 @@ export default function Step4({ data, setData, back, next }) {
 
       <hr className="card" />
 
-      {/* 🔹 Untuk survey */}
+      {/* ===== SURVEY MODE ===== */}
       {data.isSurvey && (
         <div style={{ marginTop: 14 }}>
-          <h3>{data.sifatCidera?.toUpperCase()?.startsWith("LL") ? "Status Kelengkapan (LL)" : "Status Berkas Wajib (MD)"}</h3>
+          <h3>
+            {data.sifatCidera?.toUpperCase()?.startsWith("LL")
+              ? "Status Kelengkapan (LL)"
+              : "Status Berkas Wajib (MD)"}
+          </h3>
 
           {surveyStatus.map((item, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: 4 }}>
+            <div
+              key={i}
+              style={{ display: "flex", justifyContent: "space-between", padding: 4 }}
+            >
               <div>{item.label}</div>
               <div style={{ color: item.status.startsWith("✅") ? "green" : "red" }}>
                 {item.status}
@@ -2367,77 +2231,31 @@ export default function Step4({ data, setData, back, next }) {
 
           {!dokumenOk && (
             <div style={{ color: "red", marginTop: 6 }}>
-              Ada data/dokumen yang belum lengkap. Silakan kembali ke Step 3 untuk melengkapi.
+              Ada data/dokumen yang belum lengkap. Silakan kembali ke Step 3 untuk
+              melengkapi.
             </div>
           )}
 
-          {/* tombol cetak MD */}
-          {data.isSurvey && data.sifatCidera === "MD" && dokumenOk && (
+          {/* ✅ Cetak muncul hanya kalau validSemua */}
+          {data.sifatCidera === "MD" && validSemua && (
             <div style={{ marginTop: 16, textAlign: "right" }}>
-              <button
-                onClick={openPrintSurveyMD}
-                style={{
-                  background: "linear-gradient(135deg, #c9b6ff, #e4b6ff)",
-                  color: "#4b4b4b",
-                  border: "2px solid #fff",
-                  padding: "10px 22px",
-                  borderRadius: "9999px",
-                  cursor: "pointer",
-                  fontWeight: "600",
-                  fontFamily: "'Comic Neue', cursive",
-                  fontSize: "15px",
-                  boxShadow: "0 4px 10px rgba(200,160,255,0.5)",
-                  transition: "all 0.25s ease",
-                }}
-                onMouseOver={(e) => {
-                  e.target.style.transform = "scale(1.08)";
-                  e.target.style.boxShadow = "0 6px 15px rgba(200,160,255,0.7)";
-                }}
-                onMouseOut={(e) => {
-                  e.target.style.transform = "scale(1)";
-                  e.target.style.boxShadow = "0 4px 10px rgba(200,160,255,0.5)";
-                }}
-              >
+              <KawaiiButton onClick={openPrintSurveyMD} style={kawaiiBtnStyle} hover={kawaiiBtnHover}>
                 💜✨ Cetak Laporan (MD) ✨💜
-              </button>
+              </KawaiiButton>
             </div>
           )}
 
-          {/* tombol cetak LL */}
-          {data.isSurvey && data.sifatCidera === "LL" && dokumenOk && (
+          {data.sifatCidera === "LL" && validSemua && (
             <div style={{ marginTop: 16, textAlign: "right" }}>
-              <button
-                onClick={openPrintSurveyLL}
-                style={{
-                  background: "linear-gradient(135deg, #ffb6c1, #ffc6ff)",
-                  color: "#4b4b4b",
-                  border: "2px solid #fff",
-                  padding: "10px 22px",
-                  borderRadius: "9999px",
-                  cursor: "pointer",
-                  fontWeight: "600",
-                  fontFamily: "'Comic Neue', cursive",
-                  fontSize: "15px",
-                  boxShadow: "0 4px 10px rgba(255,182,193,0.5)",
-                  transition: "all 0.25s ease",
-                }}
-                onMouseOver={(e) => {
-                  e.target.style.transform = "scale(1.08)";
-                  e.target.style.boxShadow = "0 6px 15px rgba(255,192,203,0.7)";
-                }}
-                onMouseOut={(e) => {
-                  e.target.style.transform = "scale(1)";
-                  e.target.style.boxShadow = "0 4px 10px rgba(255,182,193,0.5)";
-                }}
-              >
+              <KawaiiButton onClick={openPrintSurveyLL} style={kawaiiBtnStyle} hover={kawaiiBtnHover}>
                 🌸✨ Cetak Laporan (LL) ✨🌸
-              </button>
+              </KawaiiButton>
             </div>
           )}
         </div>
       )}
 
-      {/* 🔹 Untuk kunjungan biasa */}
+      {/* ===== KUNJUNGAN RS MODE ===== */}
       {!data.isSurvey && (
         <div
           style={{
@@ -2453,53 +2271,21 @@ export default function Step4({ data, setData, back, next }) {
           </div>
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             <li>Foto Survey: {data.mlResult?.foto}</li>
-            <li>Nama Korban: {data. mlResult?.korban}</li>
+            <li>Nama Korban: {data.mlResult?.korban}</li>
             <li>Lokasi: {data.mlResult?.lokasi}</li>
             <li>Rumah Sakit: {data.mlResult?.rumahSakit}</li>
             <li>Uraian: {data.mlResult?.uraian}</li>
             <li>Rekomendasi: {data.mlResult?.rekomendasi}</li>
           </ul>
 
-          {mlResult &&
-            !Object.values(mlResult).some(
-              (v) => typeof v === "string" && v.includes("Sedang dianalisis")
-            ) && (
-              <div style={{ marginTop: 14, textAlign: "right" }}>
-                {semuaBenar ? (
-                  <button
-                    onClick={openPrint}
-                    style={{
-                      background: "linear-gradient(135deg, #a0e7e5, #b4f8c8)",
-                      color: "#444",
-                      border: "2px solid #fff",
-                      padding: "10px 22px",
-                      borderRadius: "9999px",
-                      cursor: "pointer",
-                      fontWeight: "600",
-                      fontFamily: "'Comic Neue', cursive",
-                      fontSize: "15px",
-                      boxShadow: "0 4px 10px rgba(160,231,229,0.6)",
-                      transition: "all 0.25s ease",
-                    }}
-                    onMouseOver={(e) => {
-                      e.target.style.transform = "scale(1.08)";
-                      e.target.style.boxShadow = "0 6px 15px rgba(160,231,229,0.8)";
-                    }}
-                    onMouseOut={(e) => {
-                      e.target.style.transform = "scale(1)";
-                      e.target.style.boxShadow = "0 4px 10px rgba(160,231,229,0.6)";
-                    }}
-                  >
-                    🩵✨ Cetak Laporan Kunjungan ✨🩵
-                  </button>
-                ) : (
-                  <p style={{ color: "#ff5555", marginTop: "10px" }}>
-                    {/* ⚠️ Semua hasil Machine Learning harus benar sebelum bisa
-                    mencetak laporan. */}
-                  </p>
-                )}
-              </div>
-            )}
+          {/* ✅ Cetak muncul hanya kalau validSemua */}
+          {validSemua && (
+            <div style={{ marginTop: 14, textAlign: "right" }}>
+              <KawaiiButton onClick={openPrint} style={kawaiiBtnStyle} hover={kawaiiBtnHover}>
+                🩵✨ Cetak Laporan Kunjungan ✨🩵
+              </KawaiiButton>
+            </div>
+          )}
         </div>
       )}
 
@@ -2510,28 +2296,22 @@ export default function Step4({ data, setData, back, next }) {
         <button
           className="btn rose"
           onClick={handleKirim}
-          disabled={disabledKirim}
+          disabled={disabledKirim || isSavingRef.current}
           style={{
-            opacity: disabledKirim ? 0.5 : 1,
-            cursor: disabledKirim ? "not-allowed" : "pointer",
+            opacity: disabledKirim || isSavingRef.current ? 0.5 : 1,
+            cursor: disabledKirim || isSavingRef.current ? "not-allowed" : "pointer",
           }}
         >
           Kirim
         </button>
-        {!data.isSurvey && !semuaBenar && (
-          <p style={{ color: "red", marginTop: 8 }}>
-            
-          </p>
-        )}
       </div>
     </div>
   );
 }
 
-// ===============================================
-// 🔹 Helper Components & Functions
-// ===============================================
-
+// ===============================
+// SMALL COMPONENTS
+// ===============================
 function SummaryRow({ label, value }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 10 }}>
@@ -2541,237 +2321,18 @@ function SummaryRow({ label, value }) {
   );
 }
 
-async function prepareForOutput(rec) {
-  const vv = { ...rec };
+// 🎀 kawaii button wrapper (hover anime style)
+function KawaiiButton({ children, style, hover, ...props }) {
+  const [isHover, setIsHover] = useState(false);
 
-  // ========== 1) Identitas & meta ==========
-  vv.petugas        = rec.petugas || rec.petugasSurvei || "";
-  vv.petugasJabatan = rec.petugasJabatan || "";
-  vv.korban         = rec.korban || rec.namaKorban || "";
-  vv.namaKorban     = vv.korban;
-  vv.noPL           = rec.noPL || rec.no_pl || "";
-  vv.noBerkas       = rec.noBerkas || rec.no_berkas || "";
-  vv.alamatKorban   = rec.alamatKorban || "";
-  vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
-  vv.wilayah        = rec.wilayah || "";
-  vv.rumahSakit     = rec.rumahSakit || "";
-  if (!vv.petugasTtd) {
-   const p = rec.attachSurvey?.petugasTtd;
-   if (p?.dataURL) vv.petugasTtd = p.dataURL;
-   else if (p?.url) vv.petugasTtd = p.url;
-   else if (p?.file instanceof Blob) {
-     vv.petugasTtd = await toDataURL(p.file);
-   } else {
-     vv.petugasTtd = rec.petugasTtd || "";
-   }
- }
-
-  // tanggal2
-  vv.tglKecelakaan  = rec.tglKecelakaan || rec.tanggalKecelakaan || "";
-  vv.hariTanggal    = rec.hariTanggal || rec.tanggalKecelakaan || vv.tglKecelakaan || "";
-  vv.tglMasukRS     = rec.tglMasukRS || "";
-  vv.tglJamNotifikasi = rec.tglJamNotifikasi || "";
-  vv.tglJamKunjungan  = rec.tglJamKunjungan || "";
-
-  // normalisasi jenis survei
-  const sc = (rec.sifatCidera || "").toLowerCase();
-  vv.jenisSurvei = rec.jenisSurvei || (sc.includes("md") ? "Meninggal Dunia" : sc.includes("ll") ? "Luka-luka" : "");
-
-  // hubungan AW → boolean / "-"
-  let hs = rec.hubunganSesuai;
-  if (typeof hs === "string") {
-    const s = hs.trim().toLowerCase();
-    if (["ya","y","true","1","sesuai"].includes(s)) hs = true;
-    else if (["tidak","tdk","no","n","false","0","tidak sesuai"].includes(s)) hs = false;
-  }
-  vv.hubunganSesuai = hs ?? "";
-
-  // ========== 2) Narasi untuk output ==========
-  // SURVEI: gabungkan uraian + kesimpulan; KUNJUNGAN: pakai uraianKunjungan
-  vv.uraian = (rec.uraianSurvei || rec.uraian || "")
-    + (rec.kesimpulanSurvei ? `\n\nKesimpulan: ${rec.kesimpulanSurvei}` : "");
-  if (!vv.uraian.trim() && rec.uraianKunjungan) vv.uraian = rec.uraianKunjungan;
-
-  // Khusus kunjungan
-  vv.uraianKunjungan = rec.uraianKunjungan || vv.uraian || "";
-  vv.rekomendasi     = rec.rekomendasi || "";
-
-  // ========== 3) Lampiran / Foto (samakan jadi dataURL) ==========
-  const toDataURL = (file) =>
-    new Promise((resolve) => {
-      if (!file) return resolve("");
-      if (typeof file === "string") return resolve(file); // url/dataURL string
-      if (file.dataURL) return resolve(file.dataURL);
-      if (file.url) return resolve(file.url);
-      const blob = file instanceof Blob ? file : file.file instanceof Blob ? file.file : null;
-      if (!blob) return resolve("");
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result || "");
-      reader.onerror = () => resolve("");
-      reader.readAsDataURL(blob);
-    });
-
-  // sumber kemungkinan foto
-  const fotoCandidates = []
-    .concat(rec.attachSurvey?.fotoSurvey || [])
-    .concat(rec.fotoSurveyList || []);
-
-  // normalisasi ke {name, dataURL}
-  const allPhotos = [];
-  for (const f of (Array.isArray(fotoCandidates) ? fotoCandidates : [fotoCandidates])) {
-    if (!f) continue;
-    const name =
-      f.name || f.fileName || f.filename || f.label || (typeof f === "string" ? f.split("/").pop() : "foto");
-    const src = await toDataURL(f);
-    if (!src) continue;
-    // lewati PDF di grid foto (tetap akan tampil sebagai label teks di tabel)
-    if (/\.pdf(\?|$)/i.test(name) || src.startsWith("data:application/pdf")) continue;
-    allPhotos.push({ name, dataURL: src });
-  }
-  vv.allPhotos = allPhotos;
-
-  // tetap simpan attachSurvey mentah (MD/LL butuh halaman per-lampiran)
-  vv.attachSurvey = rec.attachSurvey || {};
-
-  return vv;
-}
-
-// 🔹 2. Bangun HTML template hasil form
-function buildBundleHtml(v) {
-  const fotoHTML =
-    v.allPhotos && v.allPhotos.length
-      ? v.allPhotos
-          .map(
-            (f, i) => `
-              <div class="foto-item">
-                <img src="${f.dataURL}" alt="Foto ${i + 1}" />
-                <p>Foto ${i + 1}: ${f.name || "-"}</p>
-              </div>`
-          )
-          .join("")
-      : "<p><em>Tidak ada foto yang diunggah</em></p>";
-
-  return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8"/>
-        <title>Laporan Kunjungan RS</title>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; background: #f9f9f9; }
-          h1 { text-align: center; color: #1e3a8a; }
-          .info p { margin: 6px 0; }
-          .foto-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 16px;
-            margin-top: 20px;
-          }
-          .foto-item {
-            background: white;
-            border: 1px solid #ccc;
-            border-radius: 10px;
-            padding: 10px;
-            text-align: center;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-          }
-          .foto-item img {
-            width: 100%;
-            max-height: 180px;
-            object-fit: cover;
-            border-radius: 8px;
-          }
-          .footer {
-            text-align: center;
-            margin-top: 40px;
-            font-size: 12px;
-            color: #666;
-          }
-        </style>
-      </head>
-      <body>
-        <h1>Laporan Hasil Kunjungan RS</h1>
-        <div class="info">
-          <p><strong>Nama Korban:</strong> ${v.korban}</p>
-          <p><strong>Lokasi Kejadian:</strong> ${v.lokasiKecelakaan}</p>
-          <p><strong>Rumah Sakit:</strong> ${v.rumahSakit}</p>
-          <p><strong>Uraian Hasil Kunjungan:</strong><br/>${
-            v.uraianKunjungan
-          }</p>
-          <p><strong>Kesimpulan / Rekomendasi:</strong><br/>${v.rekomendasi}</p>
-        </div>
-
-        <h2 style="margin-top:30px;">Foto Dokumentasi</h2>
-        <div class="foto-grid">${fotoHTML}</div>
-
-        <div class="footer">
-          <p>Dicetak otomatis dari sistem pada ${new Date().toLocaleString(
-            "id-ID"
-          )}</p>
-        </div>
-      </body>
-    </html>
-  `;
-}
-
-// 🔹 3. Cetak via iframe (biar gak buka tab baru)
-function printViaIframe(html) {
-  const iframe = document.createElement("iframe");
-  iframe.style.position = "fixed";
-  iframe.style.right = "0";
-  iframe.style.bottom = "0";
-  iframe.style.width = "0";
-  iframe.style.height = "0";
-  iframe.style.border = "none";
-  document.body.appendChild(iframe);
-  const doc = iframe.contentWindow.document;
-  doc.open();
-  doc.write(html);
-  doc.close();
-  iframe.contentWindow.focus();
-  iframe.contentWindow.print();
-
-  // hapus iframe setelah print
-  setTimeout(() => document.body.removeChild(iframe), 2000);
-}
-
-// cek dokumen untuk kunjungan RS biasa (hanya foto)
-async function checkFotoOnly(data) {
-  console.log("===== checkFotoOnly =====");
-  console.log("Data diterima:", data);
-
-  await new Promise((r) => setTimeout(r, 200));
-
-  const fotoList =
-    Array.isArray(data.attachSurvey?.fotoSurvey) &&
-    data.attachSurvey.fotoSurvey.length > 0
-      ? data.attachSurvey.fotoSurvey
-      : Array.isArray(data.fotoSurveyList)
-      ? data.fotoSurveyList
-      : [];
-
-  const hasFoto = fotoList.length > 0;
-  console.log("Foto ditemukan:", fotoList);
-
-  if (hasFoto && typeof setData === "function") {
-    setData((prev) => ({
-      ...prev,
-      att: {
-        ...(prev.att || {}),
-        fotoSurvey: fotoList,
-      },
-    }));
-  }
-
-  const status = hasFoto ? "✔ Lengkap" : "⛔ Belum diunggah";
-
-  const detail = hasFoto
-    ? fotoList.map((f, i) => ({
-        label: `Foto ${i + 1}`,
-        name: f.name || `file_${i + 1}`,
-        status: "✔ Terbaca",
-      }))
-    : [];
-
-  return [{ key: "fotoSurveyList", label: "Foto Survey", status, detail }];
+  return (
+    <button
+      {...props}
+      style={{ ...style, ...(isHover ? hover : null) }}
+      onMouseEnter={() => setIsHover(true)}
+      onMouseLeave={() => setIsHover(false)}
+    >
+      {children}
+    </button>
+  );
 }
