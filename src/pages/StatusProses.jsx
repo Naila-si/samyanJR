@@ -2698,14 +2698,11 @@ export default function StatusProses() {
     else if (variant === "rs") html = buildPreviewHTML_RS(vv);
 
     // 4) bikin blob url
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
+    const url = "data:text/html;charset=utf-8," + encodeURIComponent(html);
 
-    // ✅ arahkan tab yg udah kebuka
-    if (newTab) newTab.location.href = url;
-    else window.open(url, "_blank", "noopener,noreferrer");
-
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+// arahkan tab yg udah kebuka
+if (newTab) newTab.location.href = url;
+else window.open(url, "_blank", "noopener,noreferrer");
 
     showToast("Laporan dibuka di tab baru", "success");
     setGeneratingPreviews((prev) => ({ ...prev, [recordId]: false }));
