@@ -223,3 +223,33 @@
   .bubble { font-size: 13px; }
   .chatbot-input input { font-size: 13px; }
 }
+
+.chatbot-header {
+  background: #fff5fa;
+  padding: 10px 12px;
+  font-weight: 800;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  color: #b91c1c;            /* <-- bikin tulisan "Chatbot SAMYAN" kelihatan */
+  border-bottom: 1px dashed #ffd1e6;
+}
+
+.chatbot-header span{
+  color: inherit;            /* ikut warna header */
+  font-size: 14px;
+  letter-spacing: .2px;
+}
+
+.chatbot-toggle {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: 900;
+
+  color: #b91c1c;            /* <-- tombol minus/chat juga kelihatan */
+  opacity: .9;
+}
+.chatbot-toggle:hover{ opacity: 1; }
