@@ -1,9 +1,10 @@
-// src/pages/DataAhliWaris.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { MapContainer, TileLayer, Marker, useMap, useMapEvent } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import "leaflet.heat";
+import { supabase } from "../lib/supabaseClient";
+import { useAdminRefresh } from "../hooks/useAdminRefresh";
 
 /* --- perbaiki icon default (fallback) --- */
 delete L.Icon.Default.prototype._getIconUrl;
@@ -56,9 +57,9 @@ const makePin = (hex = "#ec4899") => {
 
 /* --- kategori & warna --- */
 const PINKS = {
-  RINGAN: "#f9a8d4", // < 10 jt
-  SEDANG: "#f472b6", // 10–20 jt
-  BERAT:  "#ec4899", // > 20 jt
+  RINGAN: "#f9a8d4",
+  SEDANG: "#f472b6",
+  BERAT:  "#ec4899",
 };
 const ICONS = {
   RINGAN: makePin(PINKS.RINGAN),
@@ -99,63 +100,18 @@ function Modal({ open, title, onClose, onSubmit, children, primaryText = "Simpan
 }
 
 export default function DataAhliWaris() {
-  /* ====== DATA AWAL ====== */
-  const initialPoints = useMemo(
-    () => [
-      {
-        id: "1",
-        lat: 0.471,
-        lng: 101.454,
-        jalan: "Jl. HR Soebrantas, Bukit Raya",
-        korbanNama: "Dewi Kartika",
-        korbanFoto:
-          "https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=640&q=80&auto=format&fit=crop",
-        ahliWarisNama: "Rudi Hartono",
-        ahliWarisAlamat: "Kec. Bukit Raya, Kota Pekanbaru",
-        santunan: 20000000,
-        weight: 0.9,
-      },
-      {
-        id: "2",
-        lat: 0.5202,
-        lng: 101.4162,
-        jalan: "Jl. Tuanku Tambusai, Payung Sekaki",
-        korbanNama: "Bima Pratama",
-        korbanFoto:
-          "https://images.unsplash.com/photo-1502767089025-6572583495b0?w=640&q=80&auto=format&fit=crop",
-        ahliWarisNama: "Andre",
-        ahliWarisAlamat: "Kec. Payung Sekaki, Kota Pekanbaru",
-        santunan: 18000000,
-        weight: 0.8,
-      },
-      {
-        id: "3",
-        lat: 0.5921,
-        lng: 101.4512,
-        jalan: "Jl. Yos Sudarso, Rumbai",
-        korbanNama: "Citra Ayu",
-        korbanFoto:
-        "https://images.unsplash.com/photo-1552053831-71594a27632d?w=640&q=80&auto=format&fit=crop",
-        ahliWarisNama: "Yudi Saputra",
-        ahliWarisAlamat: "Kec. Rumbai, Kota Pekanbaru",
-        santunan: 15000000,
-        weight: 0.7,
-      },
-    ],
-    []
-  );
+  /* ====== STATE DATA ====== */
+  const [pointsData, setPointsData] = useState([]);
 
-  const [pointsData, setPointsData] = useState(initialPoints);
   const [catFilter, setCatFilter] = useState("ALL");
   const [selected, setSelected] = useState(null);
 
-  /* ====== MODAL + FORM (Tambah / Edit) ====== */
+  /* ====== MODAL + FORM ====== */
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
   const [form, setForm] = useState({
     korbanNama: "",
-    korbanFoto: "",       // URL opsional
     ahliWarisNama: "",
     ahliWarisAlamat: "",
     jalan: "",
@@ -164,56 +120,70 @@ export default function DataAhliWaris() {
     santunan: "",
   });
 
-  const [uploadPreview, setUploadPreview] = useState("");  // dataURL dari file
-  const fileRef = useRef(null);
   const [msg, setMsg] = useState(null);
 
-  const openAdd = () => {
-    setEditingId(null);
-    setForm({
-      korbanNama: "", korbanFoto: "", ahliWarisNama: "", ahliWarisAlamat: "",
-      jalan: "", lat: "", lng: "", santunan: "",
-    });
-    setUploadPreview("");
-    if (fileRef.current) fileRef.current.value = "";
-    setMsg(null);
-    setModalOpen(true);
-  };
-
-  const openEdit = (row) => {
-    setEditingId(row.id);
-    setForm({
-      korbanNama: row.korbanNama,
-      korbanFoto: row.korbanFoto?.startsWith("http") ? row.korbanFoto : "",
-      ahliWarisNama: row.ahliWarisNama,
-      ahliWarisAlamat: row.ahliWarisAlamat,
-      jalan: row.jalan,
-      lat: String(row.lat),
-      lng: String(row.lng),
-      santunan: String(row.santunan),
-    });
-    setUploadPreview(row.korbanFoto?.startsWith("data:") ? row.korbanFoto : "");
-    if (fileRef.current) fileRef.current.value = "";
-    setMsg(null);
-    setModalOpen(true);
-  };
-
-  const onPickFile = (e) => {
-    const f = e.target.files?.[0];
-    if (!f) { setUploadPreview(""); return; }
-    const reader = new FileReader();
-    reader.onload = () => setUploadPreview(reader.result.toString());
-    reader.readAsDataURL(f);
-  };
-
-  const computeWeight = (rp) => {
+  /* ====== helper weight heatmap ====== */
+  const computeWeight = useCallback((rp) => {
     const cap = 30000000;
     const v = Math.max(0, Math.min(cap, Number(rp || 0)));
     return Number((v / cap).toFixed(2)) || 0.3;
-  };
+  }, []);
 
+  /* ====== FETCHER UNTUK HOOK ====== */
+  const fetcherWarisMap = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("data_waris")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    return (data || [])
+      .map((r) => {
+        const lat = Number(r.lat_aw);
+        const lng = Number(r.lng_aw);
+        if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
+
+        return {
+          id: r.id,
+          lat,
+          lng,
+          jalan: r.jalan_aw || "-",
+          korbanNama: r.nama_korban || "-",
+          ahliWarisNama: r.nama_penerima_aw || "-",
+          ahliWarisAlamat: r.alamat_aw || "-",
+          santunan: r.jumlah_santunan || 0,
+          weight: computeWeight(r.jumlah_santunan),
+          createdAt: r.created_at,
+        };
+      })
+      .filter(Boolean);
+  }, [computeWeight]);
+
+  const onRefresh = useCallback(async () => {
+    const mapped = await fetcherWarisMap();
+    setPointsData(mapped);
+    return mapped;
+  }, [fetcherWarisMap]);
+
+  const { loading, loadedAt, toast, setToast, refresh } =
+    useAdminRefresh(onRefresh, "Peta ahli waris berhasil diperbarui");
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  /* ====== VALIDASI ====== */
   const validate = () => {
-    const req = ["korbanNama","ahliWarisNama","ahliWarisAlamat","jalan","lat","lng","santunan"];
+    const req = [
+      "korbanNama",
+      "ahliWarisNama",
+      "ahliWarisAlamat",
+      "jalan",
+      "lat",
+      "lng",
+      "santunan",
+    ];
     const miss = req.filter((k) => !String(form[k]).trim());
     if (miss.length) return "Lengkapi seluruh field bertanda *.";
     const lat = Number(form.lat), lng = Number(form.lng);
@@ -221,54 +191,62 @@ export default function DataAhliWaris() {
     return "";
   };
 
-  const submitForm = () => {
+  /* ====== SUBMIT (INSERT / UPDATE) ====== */
+  const submitForm = async () => {
     const v = validate();
     if (v) { setMsg({ type: "err", text: v }); return; }
 
-    const lat = Number(form.lat), lng = Number(form.lng);
-    const foto = uploadPreview || form.korbanFoto ||
-      "https://images.unsplash.com/photo-1527980965255-d3b416303d12?w=640&q=80&auto=format&fit=crop";
-    const santunan = Number(String(form.santunan).replace(/[^\d]/g, ""));
-
-    if (editingId) {
-      const updated = pointsData.map(p =>
-        p.id === editingId ? {
-          ...p,
-          korbanNama: form.korbanNama,
-          korbanFoto: foto,
-          ahliWarisNama: form.ahliWarisNama,
-          ahliWarisAlamat: form.ahliWarisAlamat,
-          jalan: form.jalan,
-          lat, lng,
-          santunan,
-          weight: computeWeight(santunan),
-        } : p
-      );
-      setPointsData(updated);
-      setSelected(updated.find(p => p.id === editingId) || null);
-      setModalOpen(false);
-      return;
-    }
-
-    const p = {
-      id: String(Date.now()), lat, lng,
-      jalan: form.jalan,
-      korbanNama: form.korbanNama,
-      korbanFoto: foto,
-      ahliWarisNama: form.ahliWarisNama,
-      ahliWarisAlamat: form.ahliWarisAlamat,
-      santunan,
-      weight: computeWeight(santunan),
+    const payload = {
+      nama_korban: form.korbanNama.trim(),
+      nama_penerima_aw: form.ahliWarisNama.trim(),
+      alamat_aw: form.ahliWarisAlamat.trim(),
+      jalan_aw: form.jalan.trim(),
+      lat_aw: Number(form.lat),
+      lng_aw: Number(form.lng),
+      jumlah_santunan: Number(String(form.santunan).replace(/[^\d]/g, "")),
     };
-    setPointsData(prev => [p, ...prev]);
-    setSelected(p);
-    setModalOpen(false);
+
+    try {
+      if (editingId) {
+        const { error } = await supabase
+          .from("data_waris")
+          .update(payload)
+          .eq("id", editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase
+          .from("data_waris")
+          .insert([payload]);
+        if (error) throw error;
+      }
+
+      setModalOpen(false);
+      setSelected(null);
+      setMsg(null);
+      await refresh(); // ✅ samain refresh global
+    } catch (err) {
+      console.error("❌ submitForm map gagal:", err);
+      setMsg({ type: "err", text: "Gagal menyimpan data." });
+    }
   };
 
-  const onDelete = (id) => {
+  /* ====== DELETE ====== */
+  const onDelete = async (id) => {
     if (!confirm("Hapus data ini?")) return;
-    setPointsData(pointsData.filter(p => p.id !== id));
-    if (selected?.id === id) setSelected(null);
+    try {
+      const { error } = await supabase
+        .from("data_waris")
+        .delete()
+        .eq("id", id);
+
+      if (error) throw error;
+      if (selected?.id === id) setSelected(null);
+
+      await refresh(); // ✅ samain refresh global
+    } catch (err) {
+      console.error("❌ delete map gagal:", err);
+      alert("Gagal hapus data.");
+    }
   };
 
   /* ====== turunan ====== */
@@ -286,7 +264,7 @@ export default function DataAhliWaris() {
     <div className="aw-wrap">
       <h1 className="aw-title"><span>Peta & Data Ahli Waris</span></h1>
 
-      {/* Filter kategori santunan + tombol tambah */}
+      {/* Filter kategori santunan + tombol tambah + refresh */}
       <div className="topbar">
         <div className="aw-chips">
           {[
@@ -302,10 +280,46 @@ export default function DataAhliWaris() {
             </button>
           ))}
         </div>
-        <button className="btn primary" onClick={openAdd}>➕ Tambah Data</button>
+
+        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+          <button
+            className="btn primary"
+            onClick={() => {
+              setEditingId(null);
+              setForm({
+                korbanNama: "",
+                ahliWarisNama: "",
+                ahliWarisAlamat: "",
+                jalan: "",
+                lat: "",
+                lng: "",
+                santunan: "",
+              });
+              setModalOpen(true);
+            }}
+          >
+            ➕ Tambah Data
+          </button>
+
+          <button className="btn ghost" onClick={refresh} disabled={loading}>
+            🔄 Refresh
+          </button>
+        </div>
       </div>
 
-      {/* MAP + PANEL DETAIL (di atas) */}
+      {/* status baris + waktu update */}
+      <p className="muted small" style={{ textAlign:"center", marginTop: 6 }}>
+        {loading ? "Memuat…" : `${filtered.length} titik ditampilkan`}
+        {loadedAt ? ` • diperbarui ${loadedAt.toLocaleTimeString("id-ID")}` : ""}
+      </p>
+
+      {loading && (
+        <div style={{ padding: 10, textAlign: "center", fontWeight: 800 }}>
+          Loading peta ahli waris...
+        </div>
+      )}
+
+      {/* MAP + PANEL DETAIL */}
       <div className="aw-card aw-map">
         <div className="legend">
           <span><i style={{background:PINKS.RINGAN}}/> Ringan</span>
@@ -313,9 +327,16 @@ export default function DataAhliWaris() {
           <span><i style={{background:PINKS.BERAT}}/> Berat</span>
         </div>
 
-        <MapContainer center={[0.51,101.44]} zoom={12} scrollWheelZoom style={{height:"560px", width:"100%"}}>
-          <TileLayer attribution='&copy; OpenStreetMap contributors'
-                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+        <MapContainer
+          center={[0.51,101.44]}
+          zoom={12}
+          scrollWheelZoom
+          style={{height:"560px", width:"100%"}}
+        >
+          <TileLayer
+            attribution='&copy; OpenStreetMap contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
 
           <HeatmapLayer points={heatPoints}/>
           <MapClickClose onClose={()=>setSelected(null)} />
@@ -323,27 +344,27 @@ export default function DataAhliWaris() {
           {filtered.map(t=>{
             const cat = kategoriSantunan(t.santunan);
             return (
-              <Marker key={t.id}
-                      position={[t.lat, t.lng]}
-                      icon={ICONS[cat]}
-                      eventHandlers={{ click: ()=>setSelected(t) }} />
+              <Marker
+                key={t.id}
+                position={[t.lat, t.lng]}
+                icon={ICONS[cat]}
+                eventHandlers={{ click: ()=>setSelected(t) }}
+              />
             );
           })}
         </MapContainer>
 
-        {/* Panel ala Google place card */}
         {selected && (
           <div className="place-card">
             <button className="close" onClick={()=>setSelected(null)}>✕</button>
             <div className="pc-img">
-              <img src={selected.korbanFoto} alt={selected.korbanNama}/>
-              <div className={`pc-chip ${(()=> {
+              <div className={`pc-chip ${(()=>{
                 const k = kategoriSantunan(selected.santunan);
                 if (k==="RINGAN") return "light";
                 if (k==="SEDANG") return "mid";
                 return "hard";
               })()}`}>
-                {(() => {
+                {(()=>{
                   const k = kategoriSantunan(selected.santunan);
                   return k==="RINGAN" ? "Ringan" : k==="SEDANG" ? "Sedang" : "Berat";
                 })()}
@@ -372,15 +393,41 @@ export default function DataAhliWaris() {
                 <a className="pc-btn ghost"
                    href={`https://www.google.com/maps?q=${selected.lat},${selected.lng}`}
                    target="_blank" rel="noreferrer">Google Maps</a>
-                <button className="pc-btn" onClick={()=>openEdit(selected)}>Edit</button>
-                <button className="pc-btn ghost" onClick={()=>onDelete(selected.id)}>Hapus</button>
+              </div>
+
+              {/* aksi edit/hapus optional di panel */}
+              <div className="pc-actions" style={{ marginTop: 8 }}>
+                <button
+                  className="df-btn"
+                  onClick={()=>{
+                    setEditingId(selected.id);
+                    setForm({
+                      korbanNama: selected.korbanNama,
+                      ahliWarisNama: selected.ahliWarisNama,
+                      ahliWarisAlamat: selected.ahliWarisAlamat,
+                      jalan: selected.jalan,
+                      lat: String(selected.lat),
+                      lng: String(selected.lng),
+                      santunan: String(selected.santunan),
+                    });
+                    setModalOpen(true);
+                  }}
+                >
+                  ✏️ Edit
+                </button>
+                <button
+                  className="df-btn df-danger"
+                  onClick={()=>onDelete(selected.id)}
+                >
+                  🗑️ Hapus
+                </button>
               </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* TABEL + CRUD (di bawah peta) */}
+      {/* TABEL */}
       <div className="aw-card">
         <h3 className="card-title">Tabel Data Ahli Waris</h3>
         <div className="table-wrap">
@@ -388,7 +435,6 @@ export default function DataAhliWaris() {
             <thead>
               <tr>
                 <th>No</th>
-                <th>Foto</th>
                 <th>Nama Korban</th>
                 <th>Ahli Waris</th>
                 <th>Alamat Ahli Waris</th>
@@ -396,25 +442,17 @@ export default function DataAhliWaris() {
                 <th>Lat</th>
                 <th>Lng</th>
                 <th>Santunan</th>
-                <th>Aksi</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="df-empty">Tidak ada data.</td>
+                  <td colSpan={9} className="df-empty">Tidak ada data.</td>
                 </tr>
               ) : (
                 filtered.map((r, i) => (
                   <tr key={r.id}>
                     <td>{i + 1}</td>
-                    <td>
-                      <img
-                        src={r.korbanFoto}
-                        alt={r.korbanNama}
-                        style={{ width: 56, height: 42, objectFit: "cover", borderRadius: 8 }}
-                      />
-                    </td>
                     <td>{r.korbanNama}</td>
                     <td>{r.ahliWarisNama}</td>
                     <td>{r.ahliWarisAlamat}</td>
@@ -422,13 +460,6 @@ export default function DataAhliWaris() {
                     <td className="mono">{r.lat}</td>
                     <td className="mono">{r.lng}</td>
                     <td><b>Rp {Number(r.santunan).toLocaleString("id-ID")}</b></td>
-                    <td>
-                      <div className="df-actions">
-                        <button className="df-btn" onClick={()=>openEdit(r)}>✏️</button>
-                        <button className="df-btn df-danger" onClick={()=>onDelete(r.id)}>🗑️</button>
-                        <button className="df-btn" onClick={()=>setSelected(r)}>📍</button>
-                      </div>
-                    </td>
                   </tr>
                 ))
               )}
@@ -441,59 +472,85 @@ export default function DataAhliWaris() {
       <Modal
         open={modalOpen}
         title={editingId ? "Edit Data" : "Tambah Data"}
-        onClose={()=>setModalOpen(false)}
+        onClose={() => { setModalOpen(false); setMsg(null); }}
         onSubmit={submitForm}
         primaryText={editingId ? "Simpan Perubahan" : "Tambahkan"}
       >
         <div className="grid-form">
           <div className="field">
             <label>Nama Korban *</label>
-            <input value={form.korbanNama} onChange={e=>setForm(f=>({...f, korbanNama:e.target.value}))}/>
+            <input value={form.korbanNama}
+                   onChange={e=>setForm(f=>({...f, korbanNama:e.target.value}))}/>
           </div>
           <div className="field">
             <label>Nama Ahli Waris *</label>
-            <input value={form.ahliWarisNama} onChange={e=>setForm(f=>({...f, ahliWarisNama:e.target.value}))}/>
+            <input value={form.ahliWarisNama}
+                   onChange={e=>setForm(f=>({...f, ahliWarisNama:e.target.value}))}/>
           </div>
           <div className="field full">
             <label>Alamat Ahli Waris *</label>
-            <input value={form.ahliWarisAlamat} onChange={e=>setForm(f=>({...f, ahliWarisAlamat:e.target.value}))}/>
+            <input value={form.ahliWarisAlamat}
+                   onChange={e=>setForm(f=>({...f, ahliWarisAlamat:e.target.value}))}/>
           </div>
           <div className="field full">
             <label>Jalan / Lokasi *</label>
-            <input value={form.jalan} onChange={e=>setForm(f=>({...f, jalan:e.target.value}))}/>
+            <input value={form.jalan}
+                   onChange={e=>setForm(f=>({...f, jalan:e.target.value}))}/>
           </div>
           <div className="field">
             <label>Latitude *</label>
-            <input value={form.lat} onChange={e=>setForm(f=>({...f, lat:e.target.value}))} placeholder="0.5073"/>
+            <input value={form.lat}
+                   onChange={e=>setForm(f=>({...f, lat:e.target.value}))}
+                   placeholder="0.5073"/>
           </div>
           <div className="field">
             <label>Longitude *</label>
-            <input value={form.lng} onChange={e=>setForm(f=>({...f, lng:e.target.value}))} placeholder="101.4477"/>
+            <input value={form.lng}
+                   onChange={e=>setForm(f=>({...f, lng:e.target.value}))}
+                   placeholder="101.4477"/>
           </div>
           <div className="field">
             <label>Jumlah Santunan (Rp) *</label>
-            <input value={form.santunan} onChange={e=>setForm(f=>({...f, santunan:e.target.value.replace(/[^\d]/g,"")}))}/>
+            <input value={form.santunan}
+                   onChange={e=>setForm(f=>({...f, santunan:e.target.value.replace(/[^\d]/g,"")}))}/>
           </div>
-          <div className="field">
-            <label>URL Foto (opsional)</label>
-            <input value={form.korbanFoto} onChange={e=>setForm(f=>({...f, korbanFoto:e.target.value}))}/>
-          </div>
-          <div className="field full">
-            <label>Upload Foto (opsional)</label>
-            <input ref={fileRef} type="file" accept="image/*" onChange={onPickFile}/>
-            {(uploadPreview || form.korbanFoto) && (
-              <div className="preview">
-                <img src={uploadPreview || form.korbanFoto} alt="preview"/>
-                <span className="muted small">Preview</span>
-              </div>
-            )}
-          </div>
+
           {msg && <div className={`warn ${msg.type==="err"?"danger":""}`}>{msg.text}</div>}
         </div>
       </Modal>
 
-      {/* STYLES */}
+      {/* TOAST (sama persis pola halaman lain) */}
+      {toast && (
+        <div
+          className={`toast ${toast.type}`}
+          onAnimationEnd={() => setToast(null)}
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            background: toast.type === "error" ? "#ffe5e5" : "#e8fff0",
+            color: toast.type === "error" ? "#a30f2d" : "#0f7a4c",
+            border: "1px solid",
+            borderColor: toast.type === "error" ? "#ffb8b8" : "#bfead5",
+            padding: "10px 14px",
+            borderRadius: 10,
+            fontWeight: 600,
+            boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+            animation: "toastHide 2.2s ease forwards",
+            zIndex: 9999,
+          }}
+        >
+          {toast.msg}
+        </div>
+      )}
+
       <style>{`
+        @keyframes toastHide {
+          0% { opacity: 0; transform: translateY(8px); }
+          10% { opacity: 1; transform: translateY(0); }
+          85% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(8px); }
+        }
         :root{
           --bg:#fff5f9;
           --text:#0f172a;
@@ -536,8 +593,7 @@ export default function DataAhliWaris() {
         /* place card ala google */
         .place-card{position:absolute;z-index:600;left:14px;top:14px;width:min(420px,92vw);background:#fff;border-radius:18px;box-shadow:0 30px 70px rgba(15,23,42,.25);overflow:hidden;border:1px solid #ffe0ef}
         .close{position:absolute;right:10px;top:10px;border:0;background:#fff;border-radius:999px;width:32px;height:32px;box-shadow:0 6px 18px rgba(0,0,0,.15);cursor:pointer}
-        .pc-img{position:relative;height:200px;background:#f3f4f6}
-        .pc-img img{width:100%;height:100%;object-fit:cover;display:block}
+        .pc-img{position:relative;height:70px;background:#fff7fb}
         .pc-chip{position:absolute;left:12px;top:12px;color:#fff;font-size:12px;font-weight:900;padding:6px 10px;border-radius:999px;box-shadow:0 6px 16px rgba(0,0,0,.18)}
         .pc-chip.light{background:linear-gradient(90deg,#f9a8d4,#fbcfe8)}
         .pc-chip.mid{background:linear-gradient(90deg,#f472b6,#fb7185)}
@@ -562,8 +618,6 @@ export default function DataAhliWaris() {
         .field{display:grid;gap:6px}
         .field input{border:1px solid #ffd6e8;border-radius:12px;padding:12px 14px;outline:none}
         .field input:focus{box-shadow:0 0 0 4px var(--ring)}
-        .preview{display:inline-flex;align-items:center;gap:8px;margin-top:8px}
-        .preview img{width:96px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #ffd6e8}
         .warn{margin-top:6px;background:#fff3f5;border:1px dashed #ffb2c2;padding:10px 12px;border-radius:12px}
         .warn.danger{background:#ffe8ea;border-color:#ffc4cc;color:#7f1d1d}
 

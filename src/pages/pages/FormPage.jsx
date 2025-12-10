@@ -253,6 +253,7 @@ const validateStep = useCallback(() => {
       return true;
 
     case 4:
+      if (data.isSurvey) return true;
       if (!data.mlResult || Object.keys(data.mlResult).length === 0) {
         toast.error("Pastikan hasil validasi (ML Result) sudah ada sebelum lanjut.");
         return false;

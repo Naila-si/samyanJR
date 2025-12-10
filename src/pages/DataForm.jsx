@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { supabase } from "../lib/supabaseClient";
+import { buildSurveyHtmlClient } from "../utils/surveyReportTemplate";
 
 const detectVariant = (d) => {
   const t = (d.template || "").toLowerCase();
@@ -12,7 +13,7 @@ const detectVariant = (d) => {
 
 const TABLE_BY_VARIANT = {
   rs: "form_kunjungan_rs",
-  md: "form_survei_aw", // MD & LL sama-sama di tabel ini
+  md: "form_survei_aw",
   ll: "form_survei_aw",
 };
 
@@ -69,8 +70,16 @@ function normalizeDetailRow(variant, row) {
       (variant === "rs"
         ? "kunjungan_rs"
         : (row.jenis_survei
-            ? `survei_${String(row.jenis_survei).toLowerCase().includes("meninggal") ? "md" : "ll"}`
-            : "")),
+            ? (() => {
+                const js = String(row.jenis_survei).toLowerCase();
+                const isMD =
+                  js.includes("meninggal") ||
+                  js.includes("md") ||
+                  js.includes("ahli waris");
+                return `survei_${isMD ? "md" : "ll"}`;
+              })()
+            : "")
+          ),
 
     // umum
     korban: row.korban ?? row.nama_korban ?? null,
@@ -571,17 +580,43 @@ function DetailModal({ open, data, onClose, onPrint }) {
 
   if (!open || !data) return null;
 
-  // --- util: detect variant ---
+  // --- util: detect variant (robust) ---
   const getVariant = (d) => {
-    const t = (d.template || "").toLowerCase();
-    const s = (d.jenisSurvei || d.jenisSurveyLabel || d.sifatCidera || "").toLowerCase();
-    if (t.includes("kunjungan")) return "rs";
-    if (t.includes("survei_md") || s.includes("meninggal")) return "md";
-    if (t.includes("survei_ll") || s.includes("luka")) return "ll";
+    const t = String(d?.template || "").toLowerCase();
+    const s = String(
+      d?.jenisSurvei ||
+      d?.jenisSurveyLabel ||
+      d?.sifatCidera ||
+      d?.sifatCedera ||   // antisipasi typo key
+      ""
+    ).toLowerCase();
+
+    // Kunjungan RS
+    if (t.includes("kunjungan") || t.includes("rs")) return "rs";
+
+    // Meninggal Dunia / Ahli Waris (MD)
+    if (
+      t.includes("survei_md") ||
+      t.includes("survei-md") ||
+      t.includes("md") ||
+      t.includes("ahli waris") ||
+      s.includes("meninggal") ||
+      s.includes("md") ||
+      s.includes("ahli waris")
+    ) return "md";
+
+    // Luka-luka / TKP (LL)
+    if (
+      t.includes("survei_ll") ||
+      t.includes("survei-ll") ||
+      t.includes("ll") ||
+      s.includes("luka")
+    ) return "ll";
+
     return "ll";
   };
 
-  const variant = getVariant(data);
+  const variant = data.__variant || getVariant(data);
 
   const fmtDateLong = (d) => {
     if (!d) return "-";
@@ -616,7 +651,7 @@ function DetailModal({ open, data, onClose, onPrint }) {
     pairs = [
       ["ID", data.id],
       ["Waktu Submit", fmtDT(data.createdAt)],
-      ["Template", "Survei Ahli Waris"],
+      ["Template", "Survei Meninggal Dunia"],
       ["No. PL", data.noPL || "-"],
       ["Hari/Tanggal Survei", fmtDateLong(data.hariTanggal)],
       ["Petugas Survei", data.petugasSurvei || data.petugas || "-"],
@@ -636,7 +671,7 @@ function DetailModal({ open, data, onClose, onPrint }) {
     pairs = [
       ["ID", data.id],
       ["Waktu Submit", fmtDT(data.createdAt)],
-      ["Template", "Survei TKP"],
+      ["Template", "Survei Luka-Luka"],
       ["No. PL", data.noPL || "-"],
       ["Hari/Tanggal Survei", fmtDateLong(data.hariTanggal)],
       ["Petugas Survei", data.petugasSurvei || data.petugas || "-"],
@@ -1348,177 +1383,12 @@ export default function DataForm() {
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [verifyData, setVerifyData] = useState(null);
   const [blobUrls, setBlobUrls] = useState([]);
-
-  // Cek isi bucket foto-survey
-  const checkBucketContents = async () => {
-    try {
-      // List semua file di root
-      const { data: rootFiles, error: rootError } = await supabase.storage
-        .from('foto-survey')
-        .list();
-      
-      console.log("📁 Root files:", rootFiles);
-      
-      // List file di folder ttd-petugas
-      const { data: ttdFiles, error: ttdError } = await supabase.storage
-        .from('foto-survey')
-        .list('ttd-petugas');
-      
-      console.log("📁 TTD Petugas files:", ttdFiles);
-      
-    } catch (e) {
-      console.log("❌ Check failed:", e);
-    }
-  };
-
-  checkBucketContents();
-
-  const testTTDURLs = async () => {
-    const files = [
-      '1762931858830_yx85myp349.png',
-      '1761998738620_tt8nz7wlwk.png'
-    ];
-
-    for (const filename of files) {
-      const filePath = `ttd-petugas/${filename}`;
-      
-      // Generate public URL
-      const { data } = supabase.storage
-        .from('foto-survey')
-        .getPublicUrl(filePath);
-      
-      const publicUrl = data.publicUrl;
-      console.log(`🔗 Generated URL for ${filename}:`, publicUrl);
-      
-      // Test fetch
-      try {
-        const response = await fetch(publicUrl);
-        console.log(`📊 ${filename} - Status: ${response.status}, OK: ${response.ok}`);
-        
-        if (response.ok) {
-          console.log(`✅ ${filename} BERHASIL diakses!`);
-        } else {
-          console.log(`❌ ${filename} GAGAL - Status: ${response.status}`);
-        }
-      } catch (error) {
-        console.log(`❌ ${filename} ERROR:`, error.message);
-      }
-    }
-  };
-
-  testTTDURLs();
-
-  // === MERGE HELPERS (letakkan di atas komponen) ===
-  const prefer = (remote, local) =>
-    remote != null && remote !== "" && !(Array.isArray(remote) && remote.length === 0)
-      ? remote
-      : local;
-
-  function deepMergeAttachSurvey(remote = {}, local = {}) {
-    const out = { ...local, ...remote };
-    const parseMaybe = (v) => {
-      if (!v) return null;
-      if (typeof v === "object") return v;
-      try { return JSON.parse(v); } catch { return null; }
-    };
-    const r = parseMaybe(remote) ?? remote;
-    const l = parseMaybe(local) ?? local;
-    if (r && typeof r === "object" && l && typeof l === "object") {
-      const keys = new Set([...Object.keys(l), ...Object.keys(r)]);
-      const merged = {};
-      keys.forEach((k) => {
-        const rv = r[k];
-        const lv = l[k];
-        if (Array.isArray(rv) || Array.isArray(lv)) {
-          const arr = [].concat(rv || [], lv || []);
-          merged[k] = arr.length ? arr : undefined;
-        } else {
-          merged[k] = prefer(rv, lv);
-        }
-      });
-      return merged;
-    }
-    return r || l || {};
-  }
-
-  function mergeArrays(remoteArr, localArr) {
-    const r = Array.isArray(remoteArr) ? remoteArr : [];
-    const l = Array.isArray(localArr) ? localArr : [];
-    return r.length ? r : l;
-  }
-
-  function mergeRecords(localRow = {}, remoteRow = {}) {
-    return {
-      // meta
-      id: prefer(remoteRow.id, localRow.id),
-      waktu: prefer(remoteRow.waktu, localRow.waktu),
-      template: prefer(remoteRow.template, localRow.template),
-      korban: prefer(remoteRow.korban, localRow.korban),
-      petugas: prefer(remoteRow.petugas, localRow.petugas),
-      status: prefer(remoteRow.status, localRow.status),
-
-      // ringkasan survei
-      noPL: prefer(remoteRow.noPL, localRow.noPL),
-      jenisSurveyLabel: prefer(remoteRow.jenisSurveyLabel, localRow.jenisSurveyLabel),
-      jenisSurvei: prefer(remoteRow.jenisSurvei, localRow.jenisSurvei),
-      tanggalKecelakaan: prefer(
-        remoteRow.tanggalKecelakaan ?? remoteRow.tglKecelakaan,
-        localRow.tanggalKecelakaan ?? localRow.tglKecelakaan
-      ),
-      hariTanggal: prefer(remoteRow.hariTanggal, localRow.hariTanggal),
-
-      // yang kemarin kosong
-      noBerkas: prefer(remoteRow.noBerkas, localRow.noBerkas),
-      alamatKorban: prefer(remoteRow.alamatKorban, localRow.alamatKorban),
-      tempatKecelakaan: prefer(remoteRow.tempatKecelakaan, localRow.tempatKecelakaan),
-      tglKecelakaan: prefer(
-        remoteRow.tglKecelakaan ?? remoteRow.tanggalKecelakaan,
-        localRow.tglKecelakaan ?? localRow.tanggalKecelakaan
-      ),
-      hubunganSesuai: prefer(remoteRow.hubunganSesuai, localRow.hubunganSesuai),
-
-      // RS
-      wilayah: prefer(remoteRow.wilayah, localRow.wilayah),
-      lokasiKecelakaan: prefer(remoteRow.lokasiKecelakaan, localRow.lokasiKecelakaan),
-      rumahSakit: prefer(remoteRow.rumahSakit, localRow.rumahSakit),
-      tglMasukRS: prefer(remoteRow.tglMasukRS, localRow.tglMasukRS),
-      tglJamNotifikasi: prefer(remoteRow.tglJamNotifikasi, localRow.tglJamNotifikasi),
-      tglJamKunjungan: prefer(remoteRow.tglJamKunjungan, localRow.tglJamKunjungan),
-      uraianKunjungan: prefer(remoteRow.uraianKunjungan, localRow.uraianKunjungan),
-      rekomendasi: prefer(remoteRow.rekomendasi, localRow.rekomendasi),
-      petugasTtd: prefer(remoteRow.petugasTtd, localRow.petugasTtd),
-
-      // narasi
-      uraian: prefer(remoteRow.uraian, localRow.uraian),
-      kesimpulan: prefer(remoteRow.kesimpulan, localRow.kesimpulan),
-
-      // LAMPIRAN PENTING
-      attachSurvey: deepMergeAttachSurvey(remoteRow.attachSurvey, localRow.attachSurvey),
-      fotoSurveyList: mergeArrays(remoteRow.fotoSurveyList, localRow.fotoSurveyList),
-      rsList: mergeArrays(remoteRow.rsList, localRow.rsList),
-      fotoList: mergeArrays(remoteRow.fotoList, localRow.fotoList),
-
-      // verifikasi
-      verified: !!prefer(remoteRow.verified, localRow.verified),
-      verifiedAt: prefer(remoteRow.verifiedAt, localRow.verifiedAt),
-      verifyNote: prefer(remoteRow.verifyNote, localRow.verifyNote),
-      verifyChecklist: prefer(remoteRow.verifyChecklist, localRow.verifyChecklist),
-      unverifiedAt: prefer(remoteRow.unverifiedAt, localRow.unverifiedAt),
-      unverifyNote: prefer(remoteRow.unverifyNote, localRow.unverifyNote),
-      rejectedAt: prefer(remoteRow.rejectedAt, localRow.rejectedAt),
-      rejectNote: prefer(remoteRow.rejectNote, localRow.rejectNote),
-      finishedAt: prefer(remoteRow.finishedAt, localRow.finishedAt),
-      finishNote: prefer(remoteRow.finishNote, localRow.finishNote),
-
-      // rating
-      rating: prefer(remoteRow.rating, localRow.rating),
-      feedback: prefer(remoteRow.feedback, localRow.feedback),
-
-      _updatedAt: prefer(remoteRow._updatedAt, localRow._updatedAt),
-    };
-  }
+  const [loading, setLoading] = useState(true);
+  const [loadedAt, setLoadedAt] = useState(null);
+  const [toast, setToast] = useState(null);
 
   const syncFromSupabase = useCallback(async () => {
+    setLoading(true);
     try {
       const { data, error, status } = await supabase
         .from("dataform")
@@ -1529,16 +1399,22 @@ export default function DataForm() {
         console.error("❌ Supabase fetch error:", {
           message: error.message, details: error.details, hint: error.hint, code: error.code, status,
         });
-        setRows([]); // server-only: kosongkan UI kalau fetch gagal
+        setRows([]);
+        setToast({ type: "error", msg: "Gagal refresh data" });
         return;
       }
 
       const remote = (data || []).map(normalizeRemoteRow);
-      setRows(remote); // ✅ langsung pakai data server
+      setRows(remote);
+      setLoadedAt(new Date());
+      setToast({ type: "success", msg: "Data berhasil diperbarui" }); // ✅ toast sukses
       console.log("🟢 Supabase OK | rows:", remote.length);
     } catch (e) {
       console.error("❌ syncFromSupabase runtime error:", e);
-      setRows([]); // server-only: jangan fallback ke local
+      setRows([]);
+      setToast({ type: "error", msg: e?.message || "Gagal memuat data" });
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -1589,10 +1465,282 @@ export default function DataForm() {
   );
 
   async function buildPreviewHTML_MD(vv, objURL) {
-    console.log("🔍 MD preview FULL data:", vv);
-    console.log("📸 MD - allPhotos DETAIL:", vv.allPhotos);
-    console.log("📄 MD - attachSurvey DETAIL:", vv.attachSurvey);
+  const escapeHtml = (str = "") =>
+    String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
 
+  const toDataURL = (file) =>
+  new Promise(async (resolve) => {
+    if (!file) return resolve("");
+
+    // 1) kalau string
+    if (typeof file === "string") {
+      // kalau udah URL/dataURL, pake langsung
+      if (/^(data:|https?:\/\/)/i.test(file)) return resolve(file);
+
+      // kalau cuma nama file → bikin publicUrl
+      try {
+        const tryPaths = [
+          `survey-images/${file}`,
+          file, // fallback root
+        ];
+
+        for (const p of tryPaths) {
+          const { data: urlData } = supabase.storage
+            .from("foto-survey")
+            .getPublicUrl(p);
+
+          if (urlData?.publicUrl) return resolve(urlData.publicUrl);
+        }
+      } catch {}
+      return resolve("");
+    }
+
+    // 2) kalau object udah ada url/dataURL
+    if (file.dataURL) return resolve(file.dataURL);
+    if (file.url) return resolve(file.url);
+
+    // 3) kalau object tapi cuma ada fileName/path → generate publicUrl
+    const fn = file.fileName || file.path || file.name || "";
+    if (fn) {
+      try {
+        const tryPaths = [
+          fn.includes("/") ? fn : `survey-images/${fn}`,
+          fn,
+        ];
+
+        for (const p of tryPaths) {
+          const { data: urlData } = supabase.storage
+            .from("foto-survey")
+            .getPublicUrl(p);
+
+          if (urlData?.publicUrl) return resolve(urlData.publicUrl);
+        }
+      } catch {}
+    }
+
+    // 4) terakhir baru coba baca Blob/File
+    const blob =
+      file instanceof Blob
+        ? file
+        : file.file instanceof Blob
+        ? file.file
+        : null;
+
+    if (!blob) return resolve("");
+
+    const r = new FileReader();
+    r.onload = () => resolve(r.result || "");
+    r.onerror = () => resolve("");
+    r.readAsDataURL(blob);
+  });
+
+  // =========================
+  // 1) LAMPIRAN MD (SEMUA, PDF → IMAGE)
+  // =========================
+  const filePages = [];
+
+  // helper skip ttd / sumber informasi
+  const skipKeyRegex = /ttd|tanda\s*tangan|signature|sumber[-_\s]*informasi/i;
+
+  // =========================
+  // 1) Prefer attachSurvey kalau ada isinya
+  // =========================
+  const att = vv.attachSurvey && typeof vv.attachSurvey === "object"
+    ? vv.attachSurvey
+    : {};
+
+  const attKeys = Object.keys(att);
+
+  if (attKeys.length > 0) {
+    const order = ["mapSS", "barcode"];
+    const ordered = [
+      ...order.filter((k) => k in att).map((k) => [k, att[k]]),
+      ...Object.entries(att).filter(([k]) => !order.includes(k)),
+    ];
+
+    for (const [key, fileGroup] of ordered) {
+      if (!fileGroup) continue;
+      if (skipKeyRegex.test(key)) continue;
+      if (typeof fileGroup === "boolean") continue;
+
+      const files = Array.isArray(fileGroup) ? fileGroup : [fileGroup];
+      for (const f of files) {
+        if (!f || typeof f === "boolean") continue;
+
+        const fname = (f?.name || f?.filename || "").toLowerCase();
+        if (skipKeyRegex.test(fname)) continue;
+
+        const src = await toDataURL(f);
+        if (!src) continue;
+
+        const isPdf =
+          src.startsWith("data:application/pdf") ||
+          /\.pdf(\?|$)/i.test(src) ||
+          fname.endsWith(".pdf");
+
+        if (isPdf) {
+          try {
+            const pdfFile = f.file instanceof File ? f.file : f;
+            const imgs = await pdfToImages(pdfFile);
+            imgs.forEach((imgSrc) => {
+              filePages.push(`
+                <div class="lampiran-page">
+                  <img src="${imgSrc}" class="lampiran-img" />
+                </div>
+              `);
+            });
+          } catch {
+            filePages.push(`
+              <div class="lampiran-page">
+                <div style="color:red;font-size:11pt;text-align:center">
+                  [${escapeHtml(f?.name || key)}: PDF tidak dapat ditampilkan]
+                </div>
+              </div>
+            `);
+          }
+          continue;
+        }
+
+        filePages.push(`
+          <div class="lampiran-page">
+            <img src="${src}" class="lampiran-img" />
+          </div>
+        `);
+      }
+    }
+  }
+
+  // =========================
+  // 2) Fallback: kalau attachSurvey kosong, pakai vv.files
+  // =========================
+  if (filePages.length === 0 && Array.isArray(vv.files)) {
+    const fallbackFiles = vv.files.filter((f) => {
+      const key = (f.label || f.name || "").toLowerCase();
+      return !skipKeyRegex.test(key); // buang ttd & sumber info
+    });
+
+    for (const f of fallbackFiles) {
+      const src = await toDataURL(f);
+      if (!src) continue;
+
+      const fname = (f?.name || f?.fileName || "").toLowerCase();
+      const isPdf =
+        src.startsWith("data:application/pdf") ||
+        /\.pdf(\?|$)/i.test(src) ||
+        fname.endsWith(".pdf");
+
+      if (isPdf) {
+        filePages.push(`
+          <div class="lampiran-page">
+            <div style="color:red;font-size:11pt;text-align:center">
+              [${escapeHtml(f?.name || f?.label || "Lampiran")}: PDF tidak bisa dipratinjau]
+            </div>
+          </div>
+        `);
+        continue;
+      }
+
+      filePages.push(`
+        <div class="lampiran-page">
+          <img src="${src}" class="lampiran-img" />
+        </div>
+      `);
+    }
+  }
+
+  // =========================
+  // 2) TABEL SUMBER INFORMASI
+  // =========================
+  const renderFotoCell = async (fotoField) => {
+    if (!fotoField) return "";
+    const files = Array.isArray(fotoField) ? fotoField : [fotoField];
+    const pieces = [];
+
+    const blobToDataURL = (blob) =>
+      new Promise((resolve) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result || "");
+        r.onerror = () => resolve("");
+        r.readAsDataURL(blob);
+      });
+
+    for (const f of files) {
+      if (!f) continue;
+
+      let src = await toDataURL(f);
+
+      // ===== FIX SUBFOLDER SUMBER INFORMASI =====
+      if (
+        (!src || /^https?:\/\//i.test(src)) &&
+        (f.folder === "sumber-informasi" ||
+          /sumber[-_\s]*informasi/i.test(f.fileName || f.path || f.name || ""))
+      ) {
+        try {
+          // pakai path lengkap kalau ada subfolder
+          let fullPath =
+            f.path || f.fileName || f.name || "";
+
+          // kalau belum ada prefix sumber-informasi/, tambahin
+          if (!/^sumber-informasi\//i.test(fullPath)) {
+            const clean = fullPath.replace(/^\/+/,"");
+            fullPath = `sumber-informasi/${clean}`;
+          }
+
+          const { data, error } = await supabase.storage
+            .from("foto-survey")
+            .download(fullPath);
+
+          if (!error && data) {
+            src = await blobToDataURL(data);
+          }
+        } catch (e) {
+          console.warn("gagal download sumber-informasi:", e);
+        }
+      }
+      // =========================================
+
+      if (!src) continue;
+      if (src.startsWith("data:application/pdf")) {
+        pieces.push(`<div style="font-size:10pt;color:#a00;">[PDF tidak bisa dipratinjau]</div>`);
+        continue;
+      }
+      const isImg = src.startsWith("data:image") || /^https?:/.test(src);
+      if (isImg) {
+        pieces.push(`<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;" />`);
+      }
+    }
+
+    return pieces.join("");
+  };
+
+  const rows = [];
+  for (let i = 0; i < (vv.sumbers?.length || 0); i++) {
+    const r = vv.sumbers[i] || {};
+    const fotoCell = await renderFotoCell(r.foto || r.ttd || r.signature);
+    rows.push(`
+      <tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${escapeHtml(r.identitas || "")}</td>
+        <td>${fotoCell}</td>
+      </tr>
+    `);
+  }
+
+  // =========================
+  // 3) RETURN HTML MAIN (PAKE TEMPLATE STEP4)
+  // =========================
+  return buildSurveyHtmlClient(vv, {
+    filePages,
+    tableRows: rows.join(""),
+  });
+  }
+
+  async function buildPreviewHTML_LL(vv, objURL) {
     const escapeHtml = (str = "") =>
       String(str)
         .replace(/&/g, "&amp;")
@@ -1601,583 +1749,227 @@ export default function DataForm() {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
 
-    const fotoSources = vv.allPhotos || [];
-    console.log("📸 MD - allPhotos:", fotoSources);
+    const toDataURL = (file) =>
+      new Promise((resolve) => {
+        if (!file) return resolve("");
+        if (typeof file === "string") return resolve(file);
+        if (file.dataURL) return resolve(file.dataURL);
+        if (file.url) return resolve(file.url);
 
-    const fmtDate = (d) => {
-      if (!d) return "-";
-      try {
-        const date = new Date(d);
-        return date.toLocaleDateString("id-ID", {
-          day: "2-digit",
-          month: "long",
-          year: "numeric",
-        });
-      } catch {
-        return d;
-      }
-    };
+        const fn = file.fileName || file.path || file.name;
+        const folder = (file.folder || "").toLowerCase();
 
-    const toSrc = (item, uniqueKey = "") => {
-      if (!item) return "";
-      if (typeof item === "string") return item;
+        if (fn) {
+          // kalau item ini dari folder sumber-informasi
+          if (folder === "sumber-informasi" || /sumber[-_\s]*informasi/i.test(fn)) {
+            const clean = fn.replace(/^sumber-informasi\//i, "");
+            const fullPath = `sumber-informasi/${clean}`;
 
-      const cacheBuster = `?t=${Date.now()}&key=${uniqueKey}`;
-      
-      // ✅ Prioritaskan URL yang sudah ada (Supabase URL)
-      if (item.url && typeof item.url === 'string') {
-        console.log("✅ Using existing URL:", item.url);
-        return item.url;
-      }
-      
-      // ✅ Handle Supabase path
-      if (item.path && typeof item.path === 'string') {
-        console.log("🔄 Generating URL from path:", item.path);
-        try {
-          const { data: urlData } = supabase.storage
-            .from('foto-survey')
-            .getPublicUrl(item.path);
-          return urlData?.publicUrl || "";
-        } catch (error) {
-          console.error("❌ Error generating URL from path:", error);
-        }
-      }
-      
-      if (item.fileName && typeof item.fileName === 'string') {
-        console.log("🔄 Generating URL from fileName:", item.fileName);
-        
-        // Tentukan folder berdasarkan jenis dokumen
-        let folder = 'survey-images'; // default
-        
-        // Mapping folder untuk dokumen
-        const folderMap = {
-          ktp: 'ktp',
-          kk: 'kk',
-          bukuTabungan: 'buku-tabungan', 
-          formPengajuan: 'form-pengajuan',
-          formKeteranganAW: 'form-ahli-waris',
-          skKematian: 'surat-kematian',
-          aktaKelahiran: 'akta-kelahiran'
-        };
-        
-        // Cari folder berdasarkan key/item properties
-        if (item.jenis && folderMap[item.jenis]) {
-          folder = folderMap[item.jenis];
-        } else if (item.key && folderMap[item.key]) {
-          folder = folderMap[item.key];
+            try {
+              const { data: urlData } = supabase.storage
+                .from("foto-survey")
+                .getPublicUrl(fullPath);
+
+              if (urlData?.publicUrl) return resolve(urlData.publicUrl);
+            } catch {}
+          }
         }
         
-        console.log("📁 Using folder:", folder);
-        
-        try {
-          const fullPath = `${folder}/${item.fileName}`;
-          const { data: urlData } = supabase.storage
-            .from('foto-survey')
-            .getPublicUrl(fullPath);
-          return urlData?.publicUrl || "";
-        } catch (error) {
-          console.error("❌ Error generating URL from fileName:", error);
-        }
-      }
-
-      if (item.dataURL) return item.dataURL;
-      if (item.file instanceof File) return objURL?.(item.file) || "";
-      return "";
-    };
-
-    const renderFotoCell = (fotoField) => {
-      if (!fotoField) return "-";
-      const files = Array.isArray(fotoField) ? fotoField : [fotoField];
-      const pieces = files.map((f) => {
-        const src = toSrc(f);
-        if (!src) return "";
-        const isPdf =
-          src.startsWith("data:application/pdf") || /\.pdf(\?|$)/i.test(src) ||
-          (f?.name || "").toLowerCase().endsWith(".pdf");
-        if (isPdf) {
-          return `<div style="font-size:10pt;color:#a00;margin:2mm 0">[PDF tidak bisa dipratinjau]</div>`;
-        }
-        return `<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;border:0.3mm solid #000;margin:1mm 0" />`;
+        const blob = file instanceof Blob ? file : file.file instanceof Blob ? file.file : null;
+        if (!blob) return resolve("");
+        const r = new FileReader();
+        r.onload = () => resolve(r.result || "");
+        r.onerror = () => resolve("");
+        r.readAsDataURL(blob);
       });
-      const joined = pieces.filter(Boolean).join("");
-      return joined || "-";
-    };
 
-    // tabel Sumber Informasi
-    const sumbers = Array.isArray(vv.sumbers) ? vv.sumbers : [];
-    const tableRows =
-      sumbers.length > 0
-        ? sumbers
-            .map((r, i) => {
-              const fotoCell = renderFotoCell(r?.foto);
-              return `
-                <tr>
-                  <td style="text-align:center">${i + 1}</td>
-                  <td>${escapeHtml(r?.identitas || "")}</td>
-                  <td>${fotoCell}</td>
-                </tr>`;
-            })
-            .join("")
-        : `<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>`;
+    // =========================
+    // 1) LAMPIRAN LL (MAP + BARCODE + FOTO SURVEY AJA)
+    // =========================
+    const filePages = [];
+    const att = vv.attachSurvey || {};
+    const attKeys = Object.keys(att);
+    const skipKeyRegex = /ttd|tanda\s*tangan|signature|sumber[-_\s]*informasi/i;
 
-    const dokumenHTML = [];
-    if (vv.attachSurvey && typeof vv.attachSurvey === "object") {
-      console.log("🔍 Processing dokumen dari attachSurvey...");
-      
-      const dokumenKeys = ['ktp', 'kk', 'bukuTabungan', 'formPengajuan', 'formKeteranganAW', 'skKematian', 'aktaKelahiran'];
-      const dokumenLabels = {
-        ktp: 'KTP Korban',
-        kk: 'Kartu Keluarga (KK)',
-        bukuTabungan: 'Buku Tabungan',
-        formPengajuan: 'Formulir Pengajuan Santunan',
-        formKeteranganAW: 'Formulir Keterangan Ahli Waris',
-        skKematian: 'Surat Keterangan Kematian',
-        aktaKelahiran: 'Akta Kelahiran'
-      };
-      
-      dokumenKeys.forEach(key => {
-        const dokumen = vv.attachSurvey[key];
-        console.log(`🔍 Processing ${key}:`, dokumen);
-        
-        if (dokumen && (dokumen.url || dokumen.path || dokumen.fileName)) {
-          const src = toSrc({...dokumen, jenis: key});
-          if (src) {
-            const label = dokumenLabels[key] || key;
-            console.log(`✅ Found ${key} dengan URL:`, src);
-            
-            dokumenHTML.push(`
-              <div style="margin:10px; padding:12px; border:2px solid #4CAF50; border-radius:8px; background:#f1f8e9; text-align:center;">
-                <div style="font-weight:bold; margin-bottom:8px; color:#333;">📄 ${label}</div>
-                <img src="${src}" alt="${label}" 
-                    style="max-width:200px; max-height:200px; border:1px solid #ccc; border-radius:4px;"
-                    onerror="console.log('❌ Gagal load: ${label}')"/>
+      // kalau attachSurvey ada → pakai
+      if (attKeys.length > 0) {
+        const order = ["mapSS", "barcode", "fotoSurvey"];
+        const ordered = [...order.filter((k) => k in att).map((k) => [k, att[k]])];
+
+        for (const [key, fileGroup] of ordered) {
+          if (!fileGroup || typeof fileGroup === "boolean") continue;
+          if (skipKeyRegex.test(key)) continue;
+
+          const files = Array.isArray(fileGroup) ? fileGroup : [fileGroup];
+          for (const f of files) {
+            if (!f || typeof f === "boolean") continue;
+
+            const fname = (f?.name || f?.filename || f?.fileName || "").toLowerCase();
+            if (skipKeyRegex.test(fname)) continue;
+
+            const src = await toDataURL(f);
+            if (!src) continue;
+
+            const isPdf =
+              src.startsWith("data:application/pdf") ||
+              /\.pdf(\?|$)/i.test(src);
+
+            if (isPdf) {
+              filePages.push(`
+                <div class="lampiran-page">
+                  <div style="font-size:10pt;color:#a00;text-align:center">
+                    [${escapeHtml(f?.name || key)}: PDF tidak bisa dipratinjau]
+                  </div>
+                </div>
+              `);
+              continue;
+            }
+
+            filePages.push(`
+              <div class="lampiran-page">
+                <img src="${src}" class="lampiran-img" />
               </div>
             `);
           }
         }
-      });
-    }
+      }
 
-    // halaman per lampiran dari attachSurvey (tanpa convert PDF)
-    const filePages = [];
-    if (vv.attachSurvey && typeof vv.attachSurvey === "object") {
-      for (const [key, file] of Object.entries(vv.attachSurvey)) {
-        if (!file) continue;
-        const files = Array.isArray(file) ? file : [file];
-        const imgs = files
-          .map((f) => {
-            const src = toSrc(f);
-            if (!src) return "";
-            const isPdf =
-              src.startsWith("data:application/pdf") || /\.pdf(\?|$)/i.test(src) ||
-              (f?.name || "").toLowerCase().endsWith(".pdf");
-            if (isPdf) {
-              return `<div style="font-size:10pt;color:#a00;margin:4mm 0">[${escapeHtml(
-                f?.name || key
-              )}: PDF tidak bisa dipratinjau]</div>`;
-            }
-            return `<img src="${src}" style="width:31%;height:auto;max-height:90mm;object-fit:contain;border:0.3mm solid #ccc;margin:2mm" />`;
-          })
-          .filter(Boolean)
-          .join("");
+      // fallback kalau kosong
+      if (filePages.length === 0 && Array.isArray(vv.files)) {
+        const allowRegex = /(mapss|map_ss|maps|barcode|qr|foto\s*survey|survey)/i;
 
-        if (imgs) {
+        const fallbackFiles = vv.files.filter((f) => {
+          const label = (f.label || f.name || f.jenis || "").toLowerCase();
+          const folder = (f.folder || "").toLowerCase();
+          const fileName = (f.fileName || f.name || "").toLowerCase();
+
+          // cuma yang terkait survey, barcode, mapss
+          if (!allowRegex.test(label) && !allowRegex.test(fileName)) return false;
+
+          // extra safety: harus dari survey-images
+          if (folder && folder !== "survey-images") return false;
+
+          return true;
+        });
+
+        for (const f of fallbackFiles) {
+          const src = await toDataURL(f);
+          if (!src) continue;
+
+          const fname = (f?.name || f?.fileName || "").toLowerCase();
+          const isPdf =
+            src.startsWith("data:application/pdf") ||
+            /\.pdf(\?|$)/i.test(src) ||
+            fname.endsWith(".pdf");
+
+          if (isPdf) {
+            filePages.push(`
+              <div class="lampiran-page">
+                <div style="font-size:10pt;color:#a00;text-align:center">
+                  [${escapeHtml(f?.name || f?.label || "Lampiran")}: PDF tidak bisa dipratinjau]
+                </div>
+              </div>
+            `);
+            continue;
+          }
+
           filePages.push(`
-            <div style="text-align:center; margin:10mm 0; page-break-inside: avoid;">
-              <div style="font-weight:bold; margin-bottom:4mm; page-break-before: always;">
-                ${escapeHtml(key)}
-              </div>
-              <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:4mm; page-break-inside: avoid;">
-                ${imgs}
-              </div>
+            <div class="lampiran-page">
+              <img src="${src}" class="lampiran-img" />
             </div>
           `);
         }
       }
+
+    // =========================
+    // 2) TABEL SUMBER INFORMASI
+    // =========================
+    const renderFotoCell = async (fotoField) => {
+      if (!fotoField) return "";
+      const files = Array.isArray(fotoField) ? fotoField : [fotoField];
+      const pieces = [];
+
+      const blobToDataURL = (blob) =>
+        new Promise((resolve) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result || "");
+          r.onerror = () => resolve("");
+          r.readAsDataURL(blob);
+        });
+
+      for (const f of files) {
+        if (!f) continue;
+
+        let src = await toDataURL(f);
+
+        // ===== FIX SUBFOLDER SUMBER INFORMASI =====
+        if (
+          (!src || /^https?:\/\//i.test(src)) &&
+          (f.folder === "sumber-informasi" ||
+            /sumber[-_\s]*informasi/i.test(f.fileName || f.path || f.name || ""))
+        ) {
+          try {
+            // pakai path lengkap kalau ada subfolder
+            let fullPath =
+              f.path || f.fileName || f.name || "";
+
+            // kalau belum ada prefix sumber-informasi/, tambahin
+            if (!/^sumber-informasi\//i.test(fullPath)) {
+              const clean = fullPath.replace(/^\/+/,"");
+              fullPath = `sumber-informasi/${clean}`;
+            }
+
+            const { data, error } = await supabase.storage
+              .from("foto-survey")
+              .download(fullPath);
+
+            if (!error && data) {
+              src = await blobToDataURL(data);
+            }
+          } catch (e) {
+            console.warn("gagal download sumber-informasi:", e);
+          }
+        }
+        // =========================================
+
+        if (!src) continue;
+        if (src.startsWith("data:application/pdf")) {
+          pieces.push(`<div style="font-size:10pt;color:#a00;">[PDF tidak bisa dipratinjau]</div>`);
+          continue;
+        }
+        const isImg = src.startsWith("data:image") || /^https?:/.test(src);
+        if (isImg) {
+          pieces.push(`<img src="${src}" style="width:100%;max-height:45mm;object-fit:contain;" />`);
+        }
+      }
+
+      return pieces.join("");
+    };
+
+    const rows = [];
+    for (let i = 0; i < (vv.sumbers?.length || 0); i++) {
+      const r = vv.sumbers[i] || {};
+      const fotoCell = await renderFotoCell(r.foto || r.ttd || r.signature);
+      rows.push(`
+        <tr>
+          <td style="text-align:center">${i + 1}</td>
+          <td>${escapeHtml(r.identitas || "")}</td>
+          <td>${fotoCell}</td>
+        </tr>
+      `);
     }
 
-    const petugasSrc = (() => {
-      const raw = (vv.petugasTtd || "").toString().trim();
-      console.log("🖼️ TTD untuk preview:", raw);
-      
-      if (!raw) {
-        console.log("❌ TTD kosong di preview");
-        return null;
-      }
-
-      // Jika sudah URL lengkap
-      if (raw.startsWith('http')) {
-        console.log("✅ URL TTD valid:", raw);
-        
-        // Test image loading
-        const testImg = new Image();
-        testImg.onload = () => console.log("🖼️ TTD Image loaded successfully");
-        testImg.onerror = () => console.log("❌ TTD Image failed to load");
-        testImg.src = raw;
-        
-        return raw + '?t=' + Date.now(); // Cache busting
-      }
-      
-      return null;
-    })();
-
-    console.log("🔍 Final petugasSrc untuk HTML:", petugasSrc);
-
-    const dokumenSection = dokumenHTML.length > 0 ? `
-      <div style="page-break-before: always; margin-top: 20mm;">
-        <h3 style="text-align:center; font-size:14pt; margin-bottom:10mm;">DOKUMEN PENDUKUNG</h3>
-        <div style="display:flex; flex-wrap:wrap; justify-content:center; gap:10mm;">
-          ${dokumenHTML.join('')}
-        </div>
-      </div>
-    ` : '';
-
-    // HTML utama (mirror gaya Step4, minus iframe/auto-print)
-    const htmlMain = `<!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8"/>
-      <style>
-        @page { size: A4; margin: 12mm; }
-        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; margin:0; font-family:"Times New Roman", Times, serif; color:#000; }
-        h1 { font-size:18pt; margin:0 0 2mm; text-align:center; }
-        h2 { font-size:12pt; margin:0 0 6mm; text-align:center; }
-        .kv { display:grid; grid-template-columns: 54mm 6mm 1fr; row-gap:2mm; column-gap:2mm; margin-bottom:6mm; font-size:11pt }
-        .box { border:0.3mm solid #000; padding:2.4mm; white-space:pre-wrap; min-height:18mm }
-        table { width:100%; border-collapse:collapse; margin:4mm 0 6mm; font-size:11pt }
-        td,th { border:0.3mm solid #000; padding:2mm 2.4mm; vertical-align:top }
-        .signs { display:grid; grid-template-columns:1fr 1fr; column-gap:28mm; margin-top:10mm }
-        .lbl { margin-bottom: 10mm }
-        .space { height: 28mm }
-        .name { font-weight:bold; text-decoration:underline; }
-      </style>
-    </head>
-    <body>
-      <h1>LAPORAN HASIL SURVEI</h1>
-      <h2>APLIKASI MOBILE PELAYANAN</h2>
-
-      <div class="kv">
-        <div>No. PL</div><div>:</div><div>${escapeHtml(vv.noPL || "-")}</div>
-        <div>Hari/Tanggal Survei</div><div>:</div><div>${escapeHtml(fmtDate(vv.hariTanggal))}</div>
-        <div>Petugas Survei</div><div>:</div><div>${escapeHtml(vv.petugasSurvei || vv.petugas || "-")}</div>
-        <div>Jenis Survei</div><div>:</div><div>${escapeHtml(vv.jenisSurvei || vv.jenisSurveyLabel || "Meninggal Dunia")}</div>
-        <div>Nama Korban</div><div>:</div><div>${escapeHtml(vv.namaKorban || vv.korban || "-")}</div>
-        <div>No. Berkas</div><div>:</div><div>${escapeHtml(vv.noBerkas || "-")}</div>
-        <div>Alamat Korban</div><div>:</div><div>${escapeHtml(vv.alamatKorban || "-")}</div>
-        <div>Tempat/Tgl. Kecelakaan</div><div>:</div><div>${escapeHtml(vv.tempatKecelakaan || "-")} / ${escapeHtml(fmtDate(vv.tglKecelakaan))}</div>
-        <div>Kesesuaian Hubungan AW</div><div>:</div><div>${
-          vv.hubunganSesuai === "" || vv.hubunganSesuai == null
-            ? "-"
-            : vv.hubunganSesuai
-            ? "Sesuai"
-            : "Tidak Sesuai"
-        }</div>
-      </div>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Sumber Informasi :</div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:10mm">No</th>
-            <th>Identitas/Detil Sumber Informasi dan Metode Perolehan</th>
-            <th style="width:40mm">Foto</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Uraian & Kesimpulan Hasil Survei :</div>
-      <div class="box">${escapeHtml(vv.uraian || vv.kesimpulan || "")}</div>
-
-      <p style="margin:6mm 0 10mm;font-size:11pt">
-        Demikian laporan hasil survei ini dibuat dengan sebenarnya sesuai dengan informasi yang diperoleh.
-      </p>
-
-      <div class="signs">
-        <div>
-          <div class="lbl">Mengetahui,</div>
-          <div class="space"></div>
-          <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
-          <div>${escapeHtml("Kepala Bagian Operasional")}</div>
-        </div>
-        <div>
-          <div class="lbl">Petugas Survei,</div>
-          <div class="space"></div>
-          ${petugasSrc
-            ? `<img 
-                src="${petugasSrc}" 
-                alt="TTD Petugas" 
-                style="max-height:60px; display:block; margin:4px auto; border:1px solid #ccc;" 
-                onerror="console.log('❌ TTD gagal dimuat')"
-              />`
-            : "<div class='space'></div>"
-          }
-          <div class="name">${escapeHtml(vv.petugasSurvei || vv.petugas || "........................................")}</div>
-          <div>${escapeHtml(vv.petugasJabatan || "")}</div>
-        </div>
-      </div>
-
-      ${filePages.join("")}
-    </body>
-    </html>`;
-
-    return htmlMain;
-  }
-
-  function buildPreviewHTML_LL(vv, objURL) {
-    console.log("🔍 LL preview FULL data:", vv);
-    console.log("📸 LL - allPhotos DETAIL:", vv.allPhotos);
-    const escapeHtml = (str = "") =>
-      String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-
-    const fotoSources = vv.allPhotos || [];
-    console.log("📸 LL - allPhotos:", fotoSources);
-
-    const fmtDate = (d) => {
-      if (!d) return "-";
-      try {
-        const date = new Date(d);
-        return date.toLocaleDateString("id-ID", {
-          day: "2-digit",
-          month: "long",
-          year: "numeric",
-        });
-      } catch {
-        return d;
-      }
-    };
-
-    const toSrc = (item, uniqueKey = "") => {
-      if (!item) return "";
-      if (typeof item === "string") return item;
-
-      const cacheBuster = `?t=${Date.now()}&key=${uniqueKey}`;
-      
-      // ✅ Prioritaskan URL yang sudah ada (Supabase URL)
-      if (item.url && typeof item.url === 'string') {
-        console.log("✅ Using existing URL:", item.url);
-        return item.url;
-      }
-      
-      // ✅ Handle Supabase path
-      if (item.path && typeof item.path === 'string') {
-        console.log("🔄 Generating URL from path:", item.path);
-        try {
-          const { data: urlData } = supabase.storage
-            .from('foto-survey')
-            .getPublicUrl(item.path);
-          return urlData?.publicUrl || "";
-        } catch (error) {
-          console.error("❌ Error generating URL from path:", error);
-        }
-      }
-      
-      // ✅ Handle fileName untuk fallback
-      if (item.fileName && typeof item.fileName === 'string') {
-        console.log("🔄 toSrc: Trying fileName:", item.fileName);
-        try {
-            // Coba dengan folder survey-images
-            const fullPath = `survey-images/${item.fileName}`;
-            const { data: urlData } = supabase.storage
-                .from('foto-survey')
-                .getPublicUrl(fullPath);
-            
-            const generatedUrl = urlData?.publicUrl;
-            if (generatedUrl) {
-                console.log("✅ toSrc: Generated URL from fileName:", generatedUrl);
-                return generatedUrl;
-            }
-        } catch (error) {
-            console.error("❌ toSrc: Error generating URL from fileName:", error);
-        }
-      }
-
-      if (item.dataURL) return item.dataURL;
-      if (item.file instanceof File) return objURL?.(item.file) || "";
-      return "";
-    };
-
-    // Process foto untuk tampilan utama
-    const imgsHTML = fotoSources
-      .map((x) => {
-        const src = toSrc(x);
-        if (!src) {
-          console.log("❌ Skipping foto - no source:", x);
-          return "";
-        }
-        
-        const isPdf = src.startsWith("data:application/pdf") || /\.pdf(\?|$)/i.test(src);
-        if (isPdf) {
-          return `<div style="font-size:10pt;color:#a00;margin:2mm 0">[PDF tidak bisa dipratinjau]</div>`;
-        }
-        
-        const name = escapeHtml(x?.name || x?.fileName || "foto");
-        console.log("✅ Rendering foto:", name, src);
-        
-        return `
-          <div style="margin:10px; text-align:center;">
-            <img src="${src}" alt="${name}" 
-                 style="max-width:250px; max-height:250px; border:1px solid #ccc; border-radius:6px;"
-                 onerror="console.error('Failed to load image:', this.src)"/>
-            <div style="font-size:12px; color:#333; margin-top:5px;">${name}</div>
-          </div>`;
-      })
-      .filter(Boolean)
-      .join("");
-
-    // tabel sumber informasi (tanpa konversi async)
-    const sumbers = Array.isArray(vv.sumbers) ? vv.sumbers : [];
-    const tableRows =
-      sumbers.length > 0
-        ? sumbers
-            .map((r, i) => {
-              // render foto kolom (sederhana)
-              const fotos =
-                (Array.isArray(r?.foto) ? r.foto : r?.foto ? [r.foto] : [])
-                  .map((f) => {
-                    const s = toSrc(f);
-                    if (!s) return "";
-                    const isPdf = s.startsWith("data:application/pdf") || /\.pdf(\?|$)/i.test(s);
-                    if (isPdf) return `<div style="font-size:10pt;color:#a00;margin:2mm 0">[PDF]</div>`;
-                    return `<img src="${s}" style="width:100%;max-height:45mm;object-fit:contain;border:0.3mm solid #000;margin:1mm 0" />`;
-                  })
-                  .filter(Boolean)
-                  .join("") || "-";
-
-              return `
-                <tr>
-                  <td style="text-align:center">${i + 1}</td>
-                  <td>${escapeHtml(r?.identitas || "")}</td>
-                  <td>${fotos}</td>
-                </tr>`;
-            })
-            .join("")
-        : `<tr><td style="text-align:center">1</td><td></td><td>-</td></tr>`;
-
-    const petugasSrc = (() => {
-      const raw = (vv.petugasTtd || "").toString().trim();
-      console.log("🖼️ TTD untuk preview:", raw);
-      
-      if (!raw) {
-        console.log("❌ TTD kosong di preview");
-        return null;
-      }
-
-      // Jika sudah URL lengkap
-      if (raw.startsWith('http')) {
-        console.log("✅ URL TTD valid:", raw);
-        
-        // Test image loading
-        const testImg = new Image();
-        testImg.onload = () => console.log("🖼️ TTD Image loaded successfully");
-        testImg.onerror = () => console.log("❌ TTD Image failed to load");
-        testImg.src = raw;
-        
-        return raw + '?t=' + Date.now(); // Cache busting
-      }
-      
-      return null;
-    })();
-
-    console.log("🔍 Final petugasSrc untuk HTML:", petugasSrc);
-
-    // HTML utama (mirror gaya Step4, versi LL)
-    return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
-    <style>
-      @page { size: A4; margin: 12mm; }
-      body{ -webkit-print-color-adjust: exact; print-color-adjust: exact; margin:0;
-            font-family: "Times New Roman", Times, serif; color:#000; }
-      h1{ font-size: 18pt; margin:0 0 2mm; text-align:center; }
-      h2{ font-size: 12pt; margin:0 0 6mm; text-align:center; }
-      .kv{ display:grid; grid-template-columns: 54mm 6mm 1fr; row-gap:2mm; column-gap:2mm; margin-bottom:6mm; font-size:11pt }
-      .box{ border:0.3mm solid #000; padding:2.4mm; white-space:pre-wrap; min-height:18mm }
-      table{ width:100%; border-collapse:collapse; margin:4mm 0 6mm; font-size:11pt }
-      td,th{ border:0.3mm solid #000; padding:2mm 2.4mm; vertical-align:top }
-      .signs{ display:grid; grid-template-columns:1fr 1fr; column-gap:28mm; margin-top:10mm }
-      .lbl{ margin-bottom: 10mm }
-      .space{ height: 28mm }
-      .name{ font-weight:bold; text-decoration:underline; }
-      .foto-container{ display:flex; flex-wrap:wrap; gap:4mm; margin-top:6mm }
-    </style></head><body>
-      <h1>LAPORAN HASIL SURVEI</h1>
-      <h2>APLIKASI MOBILE PELAYANAN</h2>
-
-      <div class="kv">
-        <div>No. PL</div><div>:</div><div>${escapeHtml(vv.noPL || "-")}</div>
-        <div>Hari/Tanggal Survei</div><div>:</div><div>${escapeHtml(fmtDate(vv.hariTanggal))}</div>
-        <div>Petugas Survei</div><div>:</div><div>${escapeHtml(vv.petugas || "-")}</div>
-        <div>Jenis Survei</div><div>:</div><div>${escapeHtml(vv.jenisSurvei || vv.jenisSurveyLabel || "Luka-luka")}</div>
-        <div>Nama Korban</div><div>:</div><div>${escapeHtml(vv.korban || vv.namaKorban || "-")}</div>
-        <div>No. Berkas</div><div>:</div><div>${escapeHtml(vv.noBerkas || "-")}</div>
-        <div>Alamat Korban</div><div>:</div><div>${escapeHtml(vv.alamatKorban || "-")}</div>
-        <div>Tempat/Tgl. Kecelakaan</div><div>:</div><div>${escapeHtml(vv.tempatKecelakaan || "-")} / ${escapeHtml(fmtDate(vv.tglKecelakaan))}</div>
-        <div>Kesesuaian Hubungan AW</div><div>:</div><div>${
-          vv.hubunganSesuai === "" || vv.hubunganSesuai == null
-            ? "-"
-            : vv.hubunganSesuai
-            ? "Sesuai"
-            : "Tidak Sesuai"
-        }</div>
-      </div>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Sumber Informasi :</div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width:10mm">No</th>
-            <th>Identitas/Detil Sumber Informasi dan Metode Perolehan</th>
-            <th style="width:40mm">Foto</th>
-          </tr>
-        </thead>
-        <tbody>${tableRows}</tbody>
-      </table>
-
-      <div style="font-weight:bold;margin:0 0 2mm">Uraian & Kesimpulan Hasil Survei :</div>
-      <div class="box">${escapeHtml(vv.uraian || "")}</div>
-
-      <p style="margin:6mm 0 10mm;font-size:11pt">
-        Demikian laporan hasil survei ini dibuat dengan sebenarnya sesuai dengan informasi yang diperoleh.
-      </p>
-
-      <div class="signs">
-        <div>
-          <div class="lbl">Mengetahui,</div>
-          <div class="space"></div>
-          <div class="name">${escapeHtml("Andi Raharja, S.A.B")}</div>
-          <div>${escapeHtml("Kepala Bagian Operasional")}</div>
-        </div>
-        <div>
-          <div class="lbl">Petugas Survei,</div>
-          <div class="space"></div>
-          ${petugasSrc
-            ? `<img 
-                src="${petugasSrc}" 
-                alt="TTD Petugas" 
-                style="max-height:60px; display:block; margin:4px auto; border:1px solid #ccc;" 
-                onerror="console.log('❌ TTD gagal dimuat')"
-              />`
-            : "<div class='space'></div>"
-          }
-          <div class="name">${escapeHtml(vv.petugasSurvei || vv.petugas || "........................................")}</div>
-          <div>${escapeHtml(vv.petugasJabatan || "")}</div>
-        </div>
-      </div>
-
-      <div class="foto-container">${imgsHTML || "<i>Tidak ada foto dilampirkan.</i>"}</div>
-    </body></html>`;
+    // =========================
+    // 3) RETURN HTML MAIN (PAKE TEMPLATE STEP4)
+    // =========================
+    return buildSurveyHtmlClient(vv, {
+      filePages,
+      tableRows: rows.join(""),
+    });
   }
 
   //jangan otak atik lagi ya udah bener ini
   function buildPreviewHTML_RS(vv, objURL) {
-    console.log("🔍 RS preview FULL data:", vv);
-    console.log("🔍 foto_survey structure:", vv.foto_survey);
-    console.log("🔍 attachSurvey structure:", vv.attachSurvey);
-
     const escapeHtml = (str = "") =>
         String(str)
             .replace(/&/g, "&amp;")
@@ -2185,12 +1977,6 @@ export default function DataForm() {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#39;");
-
-    // DEBUG DETAIL: Cek struktur lengkap
-  console.log("🔍 === DETAILED STRUCTURE ANALYSIS ===");
-  console.log("🔍 Full vv object:", JSON.stringify(vv, null, 2));
-  console.log("🔍 attachSurvey type:", typeof vv.attachSurvey);
-  console.log("🔍 attachSurvey value:", vv.attachSurvey);
 
   // Coba berbagai kemungkinan struktur
   if (vv.attachSurvey) {
@@ -2215,21 +2001,18 @@ export default function DataForm() {
       }
     }
 
-    console.log("📸 === CHECKING ALL PHOTO SOURCES ===");
-    console.log("📸 vv.foto_survey:", vv.foto_survey);
-    console.log("📸 vv.attachSurvey:", vv.attachSurvey);
-    console.log("📸 vv.fotoSurveyList:", vv.fotoSurveyList);
-    console.log("📸 vv.allPhotos:", vv.allPhotos);
-    console.log("📸 vv.attachments:", vv.attachments);
-
-    const fotoCandidates = vv.allPhotos || [];
-    console.log("✅ Using allPhotos:", fotoCandidates.length);
-    console.log("✅ allPhotos content:", fotoCandidates);
+    const fotoCandidates = [];
 
     // PRIORITAS 1: Cari dari fotoSurveyList (ternyata di sini datanya)
     if (vv.fotoSurveyList && Array.isArray(vv.fotoSurveyList) && vv.fotoSurveyList.length > 0) {
         console.log("✅✅✅ FOUND fotoSurveyList with photos:", vv.fotoSurveyList.length);
-        // fotoCandidates.push(...vv.fotoSurveyList);
+        fotoCandidates.push(...vv.fotoSurveyList);
+    }
+
+    // PRIORITAS 1b: kalau belum ada, pakai allPhotos
+    if (fotoCandidates.length === 0 && vv.allPhotos && Array.isArray(vv.allPhotos)) {
+      console.log("🔄 Fallback to allPhotos:", vv.allPhotos.length);
+      fotoCandidates.push(...vv.allPhotos);
     }
 
     // PRIORITAS 2: Cari dari attachSurvey 
@@ -2278,12 +2061,7 @@ export default function DataForm() {
             }
         }
     }
-    
-    console.log("✅ Final foto candidates:", fotoCandidates);
-    console.log("✅ Number of candidates:", fotoCandidates.length);
-
-    // 🧪 TEST MANUAL - Tambahkan ini sebelum const toSrc
-    console.log("🧪 === TEST MANUAL SUPABASE URL ===");
+  
     const testFiles = [
         '1763206986877_x5ai868_foto_1763206986877.png',
         '1763206988448_uemeoc5_foto_1763206988448.png'
@@ -2358,7 +2136,10 @@ export default function DataForm() {
           console.log("🔄 Generating URL from fileName:", fotoObj.fileName);
           try {
               // PERBAIKAN: Gunakan folder survey-images (dengan DASH)
-              const fullPath = `survey-images/${fotoObj.fileName}`;
+              const fullPath = fotoObj.fileName.includes("survey-images/")
+               ? fotoObj.fileName
+               : `survey-images/${fotoObj.fileName}`;
+
               const { data: urlData } = supabase.storage
                   .from('foto-survey')
                   .getPublicUrl(fullPath);
@@ -2593,6 +2374,45 @@ export default function DataForm() {
     return null;
   }
 
+  async function listAllInFolder(bucket, baseFolder) {
+    const out = [];
+
+    const { data: items, error } = await supabase.storage
+      .from(bucket)
+      .list(baseFolder);
+
+    if (error || !items) return out;
+
+    for (const it of items) {
+      const isFolder = !it.metadata;
+
+      if (isFolder) {
+        const subFolder = `${baseFolder}/${it.name}`;
+        const { data: subItems } = await supabase.storage
+          .from(bucket)
+          .list(subFolder);
+
+        if (subItems?.length) {
+          subItems.forEach((f) => {
+            out.push({
+              ...f,
+              folder: baseFolder,
+              path: `${subFolder}/${f.name}`, // ✅ path penuh
+            });
+          });
+        }
+      } else {
+        out.push({
+          ...it,
+          folder: baseFolder,
+          path: `${baseFolder}/${it.name}`,
+        });
+      }
+    }
+
+    return out;
+  }
+
   async function loadFilesWithMetadata() {
     console.log('🔍 Loading files with metadata...');
     
@@ -2615,7 +2435,8 @@ export default function DataForm() {
               // Biasanya format: {timestamp}_{random}_{original_name}
               const timestampFromName = extractTimestampFromFileName(file.name);
               
-              const fileUrl = `https://zxtcrwaiwhveinfsjboe.supabase.co/storage/v1/object/public/foto-survey/survey-images/${file.name}`;
+              const safeName = encodeURIComponent(file.name);
+              const fileUrl = `https://zxtcrwaiwhveinfsjboe.supabase.co/storage/v1/object/public/foto-survey/survey-images/${safeName}`;
               
               return {
                 ...file,
@@ -2639,74 +2460,73 @@ export default function DataForm() {
         console.log('✅ Files with metadata:', validFiles);
       }
 
-      const { data: sumberInfoFiles, error: sumberInfoError } = await supabase.storage
-        .from('foto-survey')
-        .list('sumber-informasi');
-      
-      if (!sumberInfoError && sumberInfoFiles) {
-        const sumberInfoWithUrl = await Promise.all(
-          sumberInfoFiles.map(async (file) => {
-            try {
+      const sumberInfoFiles = await listAllInFolder("foto-survey", "sumber-informasi");
+
+      if (sumberInfoFiles && sumberInfoFiles.length) {
+        const sumberInfoWithUrl = sumberInfoFiles.map((file) => {
+          const timestampFromName = extractTimestampFromFileName(file.name);
+
+          // ✅ pakai file.path karena sudah lengkap sampai subfolder
+          const fileUrl =
+            `https://zxtcrwaiwhveinfsjboe.supabase.co/storage/v1/object/public/foto-survey/${file.path}`;
+
+          return {
+            ...file,
+            url: fileUrl,
+            folder: "sumber-informasi",
+            uploadedAt: timestampFromName,
+            timestamp: timestampFromName ? new Date(timestampFromName).getTime() : null,
+          };
+        });
+
+        allFiles = [...allFiles, ...sumberInfoWithUrl];
+        console.log("✅ Loaded sumber-informasi files:", sumberInfoWithUrl.length);
+      }
+
+      // === TAMBAHAN: LOAD FOLDER DOKUMEN (RECURSIVE, SUPPORT SUBFOLDER) ===
+      const docFolders = [
+        "kk",
+        "ktp",
+        "akta-kelahiran",
+        "buku-tabungan",
+        "form-ahli-waris",
+        "form-pengajuan",
+        "surat-kematian",
+      ];
+
+      for (const folder of docFolders) {
+        try {
+          console.log(`📁 Loading documents recursively from: ${folder}`);
+
+          // ✅ recursive list (folder bisa punya subfolder)
+          const docFiles = await listAllInFolder("foto-survey", folder);
+
+          if (docFiles && docFiles.length) {
+            const docFilesWithMeta = docFiles.map((file) => {
               const timestampFromName = extractTimestampFromFileName(file.name);
-              const fileUrl = `https://zxtcrwaiwhveinfsjboe.supabase.co/storage/v1/object/public/foto-survey/sumber-informasi/${file.name}`;
-              
+
+              // ✅ pakai file.path karena sudah full sampai subfolder
+              const fileUrl =
+                `https://zxtcrwaiwhveinfsjboe.supabase.co/storage/v1/object/public/foto-survey/${file.path}`;
+
               return {
                 ...file,
                 url: fileUrl,
-                folder: 'sumber-informasi',
+                folder,
                 uploadedAt: timestampFromName,
-                timestamp: timestampFromName ? new Date(timestampFromName).getTime() : null
+                timestamp: timestampFromName
+                  ? new Date(timestampFromName).getTime()
+                  : null,
               };
-            } catch (error) {
-              console.error(`❌ Error processing sumber-info file ${file.name}:`, error);
-              return null;
-            }
-          })
-        );
-        
-        const validSumberInfoFiles = sumberInfoWithUrl.filter(Boolean);
-        allFiles = [...allFiles, ...validSumberInfoFiles];
-        console.log('✅ Loaded sumber-informasi files:', validSumberInfoFiles.length);
-      }
+            });
 
-      // === TAMBAHAN: LOAD FOLDER DOKUMEN ===
-      const docFolders = ['kk', 'ktp', 'akta-kelahiran', 'buku-tabungan', 'form-ahli-waris', 'form-pengajuan', 'surat-kematian'];
-      
-      for (const folder of docFolders) {
-        try {
-          console.log(`📁 Loading documents from: ${folder}`);
-          
-          const { data: docFiles, error: docError } = await supabase.storage
-            .from('foto-survey')
-            .list(folder);
-          
-          if (!docError && docFiles) {
-            const docFilesWithMetadata = await Promise.all(
-              docFiles.map(async (file) => {
-                try {
-                  const timestampFromName = extractTimestampFromFileName(file.name);
-                  const fileUrl = `https://zxtcrwaiwhveinfsjboe.supabase.co/storage/v1/object/public/foto-survey/${folder}/${file.name}`;
-                  
-                  return {
-                    ...file,
-                    url: fileUrl,
-                    folder: folder,
-                    uploadedAt: timestampFromName,
-                    timestamp: timestampFromName ? new Date(timestampFromName).getTime() : null
-                  };
-                } catch (error) {
-                  console.error(`❌ Error processing ${folder} file ${file.name}:`, error);
-                  return null;
-                }
-              })
-            );
-            
-            const validDocFiles = docFilesWithMetadata.filter(Boolean);
-            allFiles = [...allFiles, ...validDocFiles];
-            console.log(`✅ Loaded ${validDocFiles.length} files from ${folder}`);
+            allFiles = [...allFiles, ...docFilesWithMeta];
+            console.log(`✅ Loaded ${docFilesWithMeta.length} files from ${folder}`);
+          } else {
+            console.log(`⚠️ No files found in ${folder}`);
           }
-        } catch (error) {
-          console.error(`❌ Error loading from ${folder}:`, error);
+        } catch (e) {
+          console.error(`❌ Error loading docs from ${folder}:`, e);
         }
       }
       // === END TAMBAHAN ===
@@ -2728,24 +2548,37 @@ export default function DataForm() {
     return allFiles;
   }
 
-  function clearPreviousInputState() {
-    if (window.previewData) {
-      window.previewData.allPhotos = [];
-      window.previewData.attachSurvey = {};
-      window.previewData.fotoSurveyList = [];
+  function pickNearestCluster(files, recordTime, windowMs = 5*60*1000, gapMs = 60*1000) {
+    const within = files
+      .filter(f => f.timestamp && Math.abs(f.timestamp - recordTime) <= windowMs)
+      .sort((a,b) => a.timestamp - b.timestamp);
+
+    if (!within.length) return [];
+
+    // cari file TERDEKAT ke recordTime
+    let nearestIdx = 0;
+    let nearestDiff = Infinity;
+    within.forEach((f, i) => {
+      const d = Math.abs(f.timestamp - recordTime);
+      if (d < nearestDiff) { nearestDiff = d; nearestIdx = i; }
+    });
+
+    // ambil “rombongan upload” di kiri-kanan
+    let start = nearestIdx;
+    let end = nearestIdx;
+
+    while (start > 0) {
+      const gap = within[start].timestamp - within[start-1].timestamp;
+      if (gap > gapMs) break;
+      start--;
     }
-    
-    // Clear URL cache
-    if (window.objURLCache) {
-      Object.values(window.objURLCache).forEach(url => {
-        if (url.startsWith('blob:')) {
-          URL.revokeObjectURL(url);
-        }
-      });
-      window.objURLCache = {};
+    while (end < within.length - 1) {
+      const gap = within[end+1].timestamp - within[end].timestamp;
+      if (gap > gapMs) break;
+      end++;
     }
-    
-    console.log("🧹 Previous input state cleared");
+
+    return within.slice(start, end + 1);
   }
 
   async function prepareForOutput(rec) {
@@ -2767,11 +2600,26 @@ export default function DataForm() {
 
     const files = [];
 
+    const seenFiles = new Set();
+    const makeSig = (f) => {
+      const folder = (f.folder || "").toLowerCase();
+      const fileName = (f.fileName || f.path || f.name || "").toLowerCase();
+      const url = (f.url || f.dataURL || "").toLowerCase();
+      return `${folder}|${fileName}|${url}`;
+    };
+
     const pushFile = (f, label = "Lampiran", source = "unknown") => {
       if (!f) {
         console.log(`❌ Skip ${label} - null/undefined`);
         return;
       }
+
+      const sig = makeSig(f);
+        if (seenFiles.has(sig)) {
+          console.log(`🟡 Skip duplicate: ${label}`, sig);
+          return;
+        }
+        seenFiles.add(sig);
 
       const hasValidIdentifier = f.fileName || f.path || f.url || f.name;
       if (!hasValidIdentifier) {
@@ -2821,102 +2669,95 @@ export default function DataForm() {
 
     console.log('🔍 [TIME-BASED] Searching files based on upload time...');
   
-    // Load files dengan metadata (timestamp dari nama file)
-    const allFilesWithMetadata = await loadFilesWithMetadata();
-    
-    const recordTime = new Date(rec.createdAt || rec.waktu).getTime();
-    console.log(`🕐 Record created at: ${new Date(recordTime).toLocaleString('id-ID')}`);
-    if (rec.createdAt || rec.waktu) {
-      const timeRelevantFiles = allFilesWithMetadata.filter(file => {
-        if (file.folder !== 'survey-images') return false;
-        if (!file.timestamp) {
-          console.log(`❌ Skip ${file.name} - no timestamp`);
-          return false;
-        }
-        
-        const fileTime = file.timestamp;
-        const timeDiff = Math.abs(fileTime - recordTime);
-        const isRelevant = timeDiff <= (5 * 60 * 1000); // ± 5 menit
-        
-        if (isRelevant) {
-          console.log(`✅ Time match: ${file.name} | File: ${new Date(fileTime).toLocaleString('id-ID')} | Record: ${new Date(recordTime).toLocaleString('id-ID')} | Diff: ${Math.round(timeDiff/1000)} detik`);
-        } else {
-          console.log(`❌ Time mismatch: ${file.name} | Diff: ${Math.round(timeDiff/1000)} detik`);
-        }
-        
-        return isRelevant;
-      });
-      
-      if (timeRelevantFiles.length > 0) {
-        console.log(`🎯 Found ${timeRelevantFiles.length} time-relevant files`);
-        
-        // Urutkan berdasarkan waktu upload (terlama ke terbaru)
-        timeRelevantFiles.sort((a, b) => a.timestamp - b.timestamp);
-        
-        // Tambahkan ke files
-        timeRelevantFiles.forEach((file, index) => {
-          pushFile({
-            name: `survey_${index + 1}`,
-            fileName: file.name,
-            url: file.url,
-            folder: file.folder,
-            uploadedAt: new Date(file.timestamp).toISOString(),
-            timeDiff: Math.abs(file.timestamp - recordTime),
-            inputId: rec.id,
-            timestamp: file.timestamp
-          }, `Foto Survey ${index + 1}`, "time-based-filter");
-        });
-      } else {
-        console.log('❌ No time-relevant files found');
-        
-        // Fallback: tampilkan info semua file survey-images
-        const allSurveyFiles = allFilesWithMetadata.filter(f => f.folder === 'survey-images');
-        console.log('📋 All survey files with timestamps:');
-        allSurveyFiles.forEach(file => {
-          const fileTime = file.timestamp ? new Date(file.timestamp).toLocaleString('id-ID') : 'Unknown';
-          console.log(`   - ${file.name}: ${fileTime}`);
-        });
-        
-        // Fallback: tampilkan 3 file terbaru dari survey-images
-        if (allSurveyFiles.length > 0) {
-          console.log('🔄 Fallback: showing latest 3 survey files');
-          const latestFiles = allSurveyFiles
-            .filter(f => f.timestamp)
-            .sort((a, b) => b.timestamp - a.timestamp)
-            .slice(0, 3);
-          
-          latestFiles.forEach((file, index) => {
-            pushFile({
-              name: `fallback_${index + 1}`,
-              fileName: file.name,
-              url: file.url,
-              folder: file.folder,
-              uploadedAt: new Date(file.timestamp).toISOString(),
-              inputId: rec.id
-            }, `Foto ${index + 1}`, "fallback");
-          });
-        }
-      }
-    }
+const allFilesWithMetadata = await loadFilesWithMetadata();
+const recordTime = new Date(rec.createdAt || rec.waktu).getTime();
+console.log(`🕐 Record created at: ${new Date(recordTime).toLocaleString('id-ID')}`);
 
+const allSurveyFiles = allFilesWithMetadata.filter(f => f.folder === "survey-images");
+
+// kalau ada counts fotoSurvey, pakai buat batas jumlah
+const expectedCount =
+  rec.counts?.fotoSurvey ||
+  rec.totalFiles ||
+  null;
+
+let picked = pickNearestCluster(allSurveyFiles, recordTime);
+
+// kalau kebanyakan, ambil yang paling dekat sesuai expectedCount
+if (expectedCount && picked.length > expectedCount) {
+  picked = [...picked]
+    .sort((a,b) =>
+      Math.abs(a.timestamp - recordTime) - Math.abs(b.timestamp - recordTime)
+    )
+    .slice(0, expectedCount)
+    .sort((a,b) => a.timestamp - b.timestamp);
+}
+
+if (picked.length > 0) {
+  console.log(`🎯 Picked ${picked.length} clustered files`);
+
+  picked.forEach((file, index) => {
+    pushFile({
+      name: `survey_${index + 1}`,
+      fileName: file.name,
+      url: file.url,
+      folder: file.folder,
+      uploadedAt: file.timestamp ? new Date(file.timestamp).toISOString() : null,
+      timeDiff: Math.abs(file.timestamp - recordTime),
+      inputId: rec.id,
+      timestamp: file.timestamp
+    }, `Foto Survey ${index + 1}`, "time-cluster");
+  });
+
+} else {
+  console.log("❌ No clustered files found, fallback latest 3");
+
+  const latestFiles = allSurveyFiles
+    .filter(f => f.timestamp)
+    .sort((a,b) => b.timestamp - a.timestamp)
+    .slice(0, 3);
+
+  latestFiles.forEach((file, index) => {
+    pushFile({
+      name: `fallback_${index + 1}`,
+      fileName: file.name,
+      url: file.url,
+      folder: file.folder,
+      uploadedAt: file.timestamp ? new Date(file.timestamp).toISOString() : null,
+      inputId: rec.id,
+      timestamp: file.timestamp
+    }, `Foto ${index + 1}`, "fallback");
+  });
+}
     console.log('🔍 [SOURCE-INFO] Searching for sumber informasi photos...');
 
     // Cari foto yang cocok untuk sumber informasi berdasarkan waktu
-    const sumberInfoFiles = allFilesWithMetadata.filter(file => {
-      if (file.folder !== 'sumber-informasi') return false;
-      if (!file.timestamp) return false;
-      
-      // Gunakan logika waktu yang sama seperti survey-images
-      const fileTime = file.timestamp;
-      const timeDiff = Math.abs(fileTime - recordTime);
-      const isRelevant = timeDiff <= (5 * 60 * 1000); // ± 5 menit
-      
-      if (isRelevant) {
-        console.log(`✅ Sumber info match: ${file.name} | Diff: ${Math.round(timeDiff/1000)} detik`);
-      }
-      
-      return isRelevant;
+    const allSumberFiles = allFilesWithMetadata
+      .filter(f => f.folder === "sumber-informasi" && f.timestamp)
+      .sort((a,b) => a.timestamp - b.timestamp);
+
+    // 1) coba window ±5 menit dulu
+    let sumberInfoFiles = allSumberFiles.filter(f => {
+      const diff = Math.abs(f.timestamp - recordTime);
+      return diff <= (15 * 60 * 1000);
     });
+
+    // 2) kalau kosong, ambil cluster terdekat seperti survey
+    if (sumberInfoFiles.length === 0) {
+      console.log("🔄 sumber-informasi kosong di window, coba cluster terdekat...");
+      sumberInfoFiles = pickNearestCluster(allSumberFiles, recordTime);
+    }
+
+    // 3) kalau masih kosong, ambil latest sesuai jumlah data sumbers dari DB
+    if (sumberInfoFiles.length === 0) {
+      const expected =
+        (Array.isArray(rec.sumbers) && rec.sumbers.length) ||
+        (Array.isArray(rec.sumberInformasi) && rec.sumberInformasi.length) ||
+        3;
+
+      console.log("🔄 sumber-informasi kosong juga, fallback latest:", expected);
+      sumberInfoFiles = [...allSumberFiles].slice(-expected);
+    }
 
     if (sumberInfoFiles.length > 0) {
       console.log(`🎯 Found ${sumberInfoFiles.length} sumber informasi files`);
@@ -2925,8 +2766,15 @@ export default function DataForm() {
       sumberInfoFiles.sort((a, b) => a.timestamp - b.timestamp);
       
       // Simpan di vv.sumbers untuk digunakan di preview
-      if (!vv.sumbers || !Array.isArray(vv.sumbers)) {
-        vv.sumbers = [];
+      if ((!vv.sumbers || vv.sumbers.length === 0) && Array.isArray(rec.sumbers) && rec.sumbers.length) {
+        console.log("🟡 Fallback vv.sumbers dari rec.sumbers (cluster sumber info tidak ketemu)");
+        
+        vv.sumbers = rec.sumbers.map((s, idx) => ({
+          identitas: s.identitas || s.nama || s.detail || `Sumber Informasi ${idx + 1}`,
+          foto: Array.isArray(s.foto)
+            ? s.foto.map(f => (typeof f === "string" ? { url: f } : f))
+            : []
+        }));
       }
       
       // Tambahkan ke sumbers array
@@ -3030,7 +2878,13 @@ export default function DataForm() {
     vv.noPL        = rec.noPL || rec.no_pl || "";
     vv.noBerkas    = rec.noBerkas || "";
     vv.alamatKorban= rec.alamatKorban || "";
-    vv.tempatKecelakaan = rec.tempatKecelakaan || rec.lokasiKecelakaan || "";
+    vv.lokasiKecelakaan =
+      rec.lokasiKecelakaan ??
+      rec.lokasi_kecelakaan ??
+      rec.tempatKecelakaan ??
+      rec.tempat_kecelakaan ??
+      "";
+    vv.tempatKecelakaan = vv.lokasiKecelakaan;
     vv.wilayah     = rec.wilayah || "";
     vv.rumahSakit  = rec.rumahSakit || "";
 
@@ -3091,42 +2945,70 @@ export default function DataForm() {
     // --- Rating/feedback ---
     vv.rating   = rec.rating ?? rec.rating_value ?? rec.star ?? null;
     vv.feedback = rec.feedback ?? rec.feedback_text ?? rec.ulasan ?? null;
-
+    
     vv.fotoSurveyList = [];
     if (rec.foto_survey) {
-        try {
-            console.log("📸 [prepareForOutput] Processing foto_survey from database:", rec.foto_survey);
-            
-            let fotoData = rec.foto_survey;
-            
-            // Jika string, parse JSON
-            if (typeof fotoData === 'string' && fotoData.trim() !== '') {
-                fotoData = JSON.parse(fotoData);
-            }
-            
-            // Jika array, process
-            if (Array.isArray(fotoData)) {
-                vv.fotoSurveyList = fotoData;
-                console.log("✅ foto_survey processed, count:", fotoData.length);
-                
-                // Push ke files
-                fotoData.forEach((foto, index) => {
-                    if (foto && (foto.url || foto.fileName || foto.name)) {
-                        pushFile(foto, `Foto Survey ${index + 1}`);
-                    }
-                });
-            }
-        } catch (error) {
-            console.error("❌ Error parsing foto_survey:", error);
-            vv.fotoSurveyList = [];
+      try {
+        let fotoData = rec.foto_survey;
+        if (typeof fotoData === "string" && fotoData.trim() !== "") {
+          fotoData = JSON.parse(fotoData);
         }
-    } else {
-        console.log("📸 [prepareForOutput] No foto_survey found, set empty array");
-    }
 
+        if (Array.isArray(fotoData)) {
+          vv.fotoSurveyList = fotoData;
+
+          // ✅ hanya push kalau belum ada foto survey dari cluster
+          const alreadyHasSurvey = files.some(f =>
+            /foto\s*survey/i.test(f.label || f.name || "")
+          );
+
+          if (!alreadyHasSurvey) {
+            fotoData.forEach((foto, index) => {
+              if (foto && (foto.url || foto.fileName || foto.name)) {
+                pushFile(foto, `Foto Survey ${index + 1}`, "db-foto_survey");
+              }
+            });
+          } else {
+            console.log("🟢 Skip pushing rec.foto_survey karena sudah ada cluster");
+          }
+        }
+      } catch (e) {
+        console.error("❌ Error parsing foto_survey:", e);
+      }
+    }
     console.log("📸 [prepareForOutput] Final fotoSurveyList:", vv.fotoSurveyList);
 
-    vv.attachSurvey = rec.attachSurvey || rec.attach_survey || rec.attachments || {};
+    // ambil attachSurvey mentah
+    const rawAttach =
+      rec.attachSurvey || rec.attach_survey || rec.attachments || {};
+
+    // normalisasi key -> canonical
+    const CANON = {
+      // map ss
+      mapss: "mapSS",
+      map_ss: "mapSS",
+      mapSS: "mapSS",
+
+      // barcode / qr
+      barcode: "barcode",
+      barcode_qr: "barcode",
+      barcodeqr: "barcode",
+      qr: "barcode",
+      qrcode: "barcode",
+      qr_code: "barcode",
+
+      // foto survey
+      fotosurvey: "fotoSurvey",
+      foto_survey: "fotoSurvey",
+      fotoSurvey: "fotoSurvey",
+    };
+
+    vv.attachSurvey = Object.entries(rawAttach).reduce((acc, [k, v]) => {
+      const kk = String(k).trim();
+      const canonKey = CANON[kk.toLowerCase()] || kk; // fallback biar gak ilang
+      acc[canonKey] = v;
+      return acc;
+    }, {});
     console.log("🔍 [prepareForOutput] attachSurvey original:", rec.attachSurvey);
     console.log("🔍 [prepareForOutput] attachSurvey final:", vv.attachSurvey);
 
@@ -3134,84 +3016,80 @@ export default function DataForm() {
     console.log("   - fotoSurveyList:", vv.fotoSurveyList);
     console.log("   - attachSurvey:", vv.attachSurvey);
 
-    if (vv.attachSurvey && typeof vv.attachSurvey === 'object' && !Array.isArray(vv.attachSurvey)) {
+    if (vv.attachSurvey && typeof vv.attachSurvey === "object" && !Array.isArray(vv.attachSurvey)) {
       console.log("📸 Processing attachSurvey boolean flags");
-      
+
       const folderMapping = {
-        kk: 'kk',
-        ktp: 'ktp', 
-        akta_kelahiran: 'akta-kelahiran',
-        buku_tabungan: 'buku-tabungan',
-        form_keterangan_ahli_waris: 'form-ahli-waris',
-        form_pengajuan_santunan: 'form-pengajuan',
-        surat_keterangan_kematian: 'surat-kematian',
-        map_ss: 'survey-images',
-        barcode_qr: 'survey-images'
+        kk: "kk",
+        ktp: "ktp",
+        akta_kelahiran: "akta-kelahiran",
+        buku_tabungan: "buku-tabungan",
+        form_keterangan_ahli_waris: "form-ahli-waris",
+        form_pengajuan_santunan: "form-pengajuan",
+        surat_keterangan_kematian: "surat-kematian",
+        map_ss: "survey-images",
+        barcode_qr: "survey-images",
+        fotoSurvey: "survey-images",
       };
 
-      Object.entries(vv.attachSurvey).forEach(([key, value]) => {
-        if (key.toLowerCase().includes('ttd') || key.toLowerCase().includes('signature') || value === false) {
-          return;
-        }
-        
-        if (value === true) {
-          console.log(`🔍 Looking for file matching key: ${key}`);
-          
-          const targetFolder = folderMapping[key] || 'survey-images';
-          console.log(`📁 Searching in folder: ${targetFolder} for key: ${key}`);
+      const skipAttachRegex = /ttd|signature|sumber[-_\s]*informasi/i;
 
-          // === PASTIKAN PAKAI bestMatch BUKAN matchingFile ===
-          // Cari file di folder yang sesuai berdasarkan timestamp
-          const folderFiles = allFilesWithMetadata.filter(file => file.folder === targetFolder);
-          
-          if (folderFiles.length === 0) {
-            console.log(`❌ No files found in folder ${targetFolder}`);
-            return;
+      const pickedByFolder = {}; // { folder: Set(fileName) }
+
+      Object.entries(vv.attachSurvey).forEach(([key, value]) => {
+        const kLower = key.toLowerCase();
+        if (skipAttachRegex.test(kLower) || value === false) return;
+
+        if (value === true) {
+          const targetFolder = folderMapping[key] || "survey-images";
+
+          const folderFiles = allFilesWithMetadata.filter(
+            (file) => file.folder === targetFolder && file.timestamp
+          );
+
+          if (folderFiles.length === 0) return;
+
+          if (!pickedByFolder[targetFolder]) {
+            pickedByFolder[targetFolder] = new Set();
           }
 
-          // Cari file dengan timestamp terdekat ke record time
           let bestMatch = null;
           let smallestDiff = Infinity;
 
-          folderFiles.forEach(file => {
-            if (file.timestamp) {
-              const timeDiff = Math.abs(file.timestamp - recordTime);
-              
-              // Untuk dokumen, gunakan tolerance yang lebih longgar (2 menit)
-              if (timeDiff < smallestDiff && timeDiff < (2 * 60 * 1000)) {
-                smallestDiff = timeDiff;
-                bestMatch = file;
-              }
+          folderFiles.forEach((file) => {
+            if (pickedByFolder[targetFolder].has(file.name)) return;
+
+            const timeDiff = Math.abs(file.timestamp - recordTime);
+            if (timeDiff < smallestDiff && timeDiff < 2 * 60 * 1000) {
+              smallestDiff = timeDiff;
+              bestMatch = file;
             }
           });
 
-          // === INI YANG PERLU DIPERBAIKI ===
-          // PASTIKAN PAKAI bestMatch, BUKAN matchingFile
           if (bestMatch && bestMatch.url) {
-            console.log(`✅ Found matching file for ${key}:`, bestMatch.name, `| Time diff: ${smallestDiff}ms`);
-            pushFile({
+            pickedByFolder[targetFolder].add(bestMatch.name);
+
+            const matchedObj = {
               name: key,
               fileName: bestMatch.name,
               url: bestMatch.url,
               folder: bestMatch.folder,
               inputId: rec.id,
-              jenis: key
-            }, key);
+              jenis: key,
+              label: key,
+            };
+
+            pushFile(matchedObj, key);
+            vv.attachSurvey[key] = matchedObj;
           } else {
-            console.warn(`❌ No matching file found for ${key} in folder ${targetFolder}`);
-            console.log(`📋 Available files in ${targetFolder}:`, folderFiles.map(f => f.name));
+            console.warn(`❌ No matching file found for ${key} in ${targetFolder}`);
           }
-        }
-        // Jika value adalah object/string, langsung push
-        else if (value && (typeof value === 'object' || typeof value === 'string')) {
+        } else if (value && (typeof value === "object" || typeof value === "string")) {
           pushFile(value, key);
         }
       });
     }
-
-    // Process array sources
-    pushFile(rec.fotoSurveyList, "Foto Survey");
-    pushFile(rec.fotoList, "Foto Survey");
+    console.log("✅ attachSurvey after bool-resolve:", vv.attachSurvey);
 
     // Root-level attachments
     ["ktp","kk","bukuTabungan","formPengajuan","formKeteranganAW","skKematian","aktaKelahiran"]
@@ -3268,9 +3146,12 @@ export default function DataForm() {
       // 3) bentuk payload final untuk modal/preview
       const vv = await prepareForOutput(merged);
 
-      // 4) pilih builder preview sesuai varian (punyamu sudah ada)
-      const template = (vv.template || "").toLowerCase();
-      const sifat = (vv.sifatCidera || vv.jenisSurvei || "").toLowerCase();
+      console.log("🔥 variant:", variant);
+      console.log("🔥 vv.template:", vv.template);
+      console.log("🔥 vv.jenisSurvei:", vv.jenisSurvei);
+      console.log("🔥 vv.sifatCidera:", vv.sifatCidera);
+
+      // 4) pilih builder preview sesuai varian
       const createdBlobUrls = [];
       const objURL = (maybeFile) => {
         if (maybeFile instanceof File) {
@@ -3281,17 +3162,22 @@ export default function DataForm() {
         return null;
       };
 
-      if (sifat.includes("meninggal") || template.includes("survei_md")) {
+      const vLower = (variant || "").toLowerCase();
+      const tLower = (vv.template || "").toLowerCase(); // fallback kalau variant null
+
+      if (vLower === "md" || tLower.includes("survei_md")) {
         const html = await buildPreviewHTML_MD(vv, objURL);
         setDetailData({ ...vv, __variant: "md", previewHTML: html });
-      } else if (sifat.includes("luka") || template.includes("survei_ll")) {
-        const html = buildPreviewHTML_LL(vv, objURL);
+
+      } else if (vLower === "ll" || tLower.includes("survei_ll")) {
+        const html = await buildPreviewHTML_LL(vv, objURL);
         setDetailData({ ...vv, __variant: "ll", previewHTML: html });
-      } else if (template.includes("kunjungan")) {
-        const html = buildPreviewHTML_RS(vv, objURL);
+
+      } else if (vLower === "rs" || tLower.includes("kunjungan")) {
+        const html = await buildPreviewHTML_RS(vv, objURL);
         setDetailData({ ...vv, __variant: "rs", previewHTML: html });
+
       } else {
-        // fallback: tetap tampilkan tanpa HTML khusus
         setDetailData({ ...vv, __variant: "ll", previewHTML: null });
       }
 
@@ -3395,6 +3281,11 @@ export default function DataForm() {
         <p className="df-sub">
           Rekap pengajuan dari halaman SPA. Silakan verifikasi data yang
           masuk—klik baris untuk detail, atau gunakan tombol aksi di kanan.
+          {loadedAt && (
+            <span style={{ marginLeft: 8, fontSize: "0.9em", color: "#888" }}>
+              • diperbarui {loadedAt.toLocaleTimeString("id-ID")}
+            </span>
+          )}
         </p>
       </header>
 
@@ -3408,14 +3299,15 @@ export default function DataForm() {
           />
           <span className="df-emoji">🔎</span>
         </div>
+
         <div className="df-filters">
           <select value={templ} onChange={(e) => setTempl(e.target.value)}>
             <option value="all">Semua Template</option>
             <option value="kunjungan_rs">Kunjungan RS</option>
-            <option value="survei_ll">Survei Luka-Luka</option>{" "}
-            {/* tambahkan */}
+            <option value="survei_ll">Survei Luka-Luka</option>
             <option value="survei_md">Survei Meninggal Dunia</option>
           </select>
+
           <select value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="all">Semua Status</option>
             <option value="terkirim">Terkirim</option>
@@ -3423,6 +3315,16 @@ export default function DataForm() {
             <option value="selesai">Selesai</option>
             <option value="ditolak">Ditolak</option>
           </select>
+
+          {/* ✅ TOMBOL REFRESH */}
+          <button
+            className="kawaii-button"
+            onClick={syncFromSupabase}
+            title="Refresh data dari server"
+            style={{ whiteSpace: "nowrap" }}
+          >
+            🔄 Refresh
+          </button>
         </div>
       </section>
 
@@ -3453,285 +3355,81 @@ export default function DataForm() {
                 <div>Aksi</div>
               </div>
 
-              {filtered.map((r, i) => {
-                // 🔍 Gabungkan semua file dari berbagai jenis
-                const allFiles = [];
+             {filtered.map((r, i) => (
+              <React.Fragment key={r.id || i}>
+                <div
+                  className="df-row"
+                  role="row"
+                  style={{ alignItems: "start" }}
+                >
+                  <div>{i + 1}</div>
+                  <div className="df-mono">{fmtDT(r.waktu)}</div>
+                  <div>{pill(r.template)}</div>
+                  <div>{r.jenisSurveyLabel || r.jenisSurvei || "-"}</div>
+                  <div className="df-mono">{r.noPL || "-"}</div>
+                  <div>{r.korban || "-"}</div>
+                  <div>{r.petugas || "-"}</div>
+                  <div className="df-mono">
+                    {fmtD(r.tanggalKecelakaan || r.tglKecelakaan || r.hariTanggal)}
+                  </div>
+                  <div>{badge(r.status)}</div>
 
-                // === Hasil Kunjungan ===
-                if (r.fotoSurveyList?.length) {
-                  allFiles.push(
-                    ...r.fotoSurveyList.map((f) => ({
-                      type: "foto",
-                      name: f.name,
-                      dataURL: f.dataURL,
-                    }))
-                  );
-                }
+                  {/* Kolom Rating */}
+                  <div
+                    style={{
+                      minWidth: 0,
+                      whiteSpace: "normal",
+                      wordBreak: "break-word",
+                      padding: "4px 6px",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <div>
+                      {(() => {
+                        const n = Math.max(0, Math.min(5, parseInt(r.rating, 10) || 0));
+                        return n ? "⭐".repeat(n) + "☆".repeat(5 - n) : "—";
+                      })()}
+                    </div>
 
-                const surveyFiles = [
-                  { key: "ktp", label: "KTP Korban" },
-                  { key: "kk", label: "Kartu Keluarga (KK)" },
-                  { key: "bukuTabungan", label: "Buku Tabungan" },
-                  {
-                    key: "formPengajuan",
-                    label: "Formulir Pengajuan Santunan",
-                  },
-                  {
-                    key: "formKeteranganAW",
-                    label: "Formulir Keterangan Ahli Waris",
-                  },
-                  { key: "skKematian", label: "Surat Keterangan Kematian" },
-                  { key: "aktaKelahiran", label: "Akta Kelahiran" },
-                ];
-
-                const pushFile = (f, suggestedLabel = "Berkas") => {
-                  if (!f) return;
-
-                  if (Array.isArray(f)) {
-                    f.forEach((ff) => pushFile(ff, suggestedLabel));
-                    return;
-                  }
-
-                  if (typeof f === "object") {
-                    const name =
-                      f.name ||
-                      f.fileName ||
-                      f.filename ||
-                      f.label ||
-                      suggestedLabel;
-
-                    const dataURL =
-                      f.dataURL ||
-                      f.url ||
-                      f.path ||
-                      f.data ||
-                      (f.file instanceof File
-                        ? URL.createObjectURL(f.file)
-                        : f.file) ||
-                      (typeof f.file === "string" ? f.file : null);
-
-                    if (!dataURL) {
-                      console.warn(
-                        "⚠️ Tidak ada dataURL/URL/data untuk file:",
-                        name,
-                        f
-                      );
-                      return;
-                    }
-
-                    allFiles.push({
-                      type: /\.(jpg|jpeg|png|gif|webp)$/i.test(name)
-                        ? "foto"
-                        : "berkas",
-                      label: f.label || suggestedLabel,
-                      name: name || "Unknown",
-                      dataURL,
-                    });
-                    return;
-                  }
-
-                  if (typeof f === "string") {
-                    allFiles.push({
-                      type: /\.(jpg|jpeg|png|gif|webp)$/i.test(f)
-                        ? "foto"
-                        : "berkas",
-                      label: suggestedLabel,
-                      name: f.split("/").pop() || suggestedLabel,
-                      dataURL: f,
-                    });
-                  }
-                };
-
-                if (
-                  r.attachSurvey &&
-                  typeof r.attachSurvey === "object" &&
-                  !Array.isArray(r.attachSurvey)
-                ) {
-                  Object.keys(r.attachSurvey).forEach((k) => {
-                    const val = r.attachSurvey[k];
-                    const meta = surveyFiles.find((s) => s.key === k);
-                    pushFile(val, meta ? meta.label : k);
-                  });
-                }
-
-                Object.entries(r.attachSurvey || {}).forEach(([k, v]) => {
-                  console.log("🧱 Detail attachSurvey entry:", k);
-                  try {
-                    console.log(
-                      "🪣 Nilai lengkap:",
-                      JSON.stringify(v, null, 2)
-                    );
-                  } catch {
-                    console.log("❌ Gagal stringify:", v);
-                  }
-                });
-
-                if (Array.isArray(r.attachList) && r.attachList.length) {
-                  r.attachList.forEach((f) =>
-                    pushFile(f, f.label || f.name || "Lampiran")
-                  );
-                }
-
-                if (r.hasilFormFile) {
-                  pushFile(
-                    r.hasilFormFile,
-                    r.hasilFormFile.label ||
-                      r.hasilFormFile.name ||
-                      "Hasil Form"
-                  );
-                }
-
-                surveyFiles.forEach((f) => {
-                  const candidates = [
-                    r[f.key],
-                    r.data?.[f.key],
-                    r.att?.[f.key],
-                    r[f.key + "File"],
-                  ];
-                  const found = candidates.find((x) => !!x);
-                  if (found) pushFile(found, f.label);
-                });
-
-                if (
-                  Array.isArray(r.fotoSurveyList) &&
-                  r.fotoSurveyList.length
-                ) {
-                  r.fotoSurveyList.forEach((f) =>
-                    pushFile(f, f.name || "Foto Survey")
-                  );
-                }
-                if (Array.isArray(r.fotoSurvey) && r.fotoSurvey.length) {
-                  r.fotoSurvey.forEach((f) =>
-                    pushFile(f, f.name || "Foto Survey")
-                  );
-                }
-                if (Array.isArray(r.fotoList) && r.fotoList.length) {
-                  r.fotoList.forEach((f) => pushFile(f, f.name || "Foto"));
-                }
-
-                if (r.attachments && typeof r.attachments === "object") {
-                  if (Array.isArray(r.attachments)) {
-                    r.attachments.forEach((f) =>
-                      pushFile(f, f.name || "Lampiran")
-                    );
-                  } else {
-                    Object.keys(r.attachments).forEach((k) =>
-                      pushFile(r.attachments[k], k)
-                    );
-                  }
-                }
-
-                if (r.attachSurvey && typeof r.attachSurvey === "object") {
-                  console.log(
-                    "🧩 Semua key di attachSurvey:",
-                    Object.keys(r.attachSurvey)
-                  );
-                  Object.keys(r.attachSurvey).forEach((k) => {
-                    console.log(
-                      "🧱 Detail attachSurvey entry:",
-                      k,
-                      r.attachSurvey[k]
-                    );
-                    if (
-                      !allFiles.some(
-                        (f) => f.name?.includes(k) || f.label?.includes(k)
-                      )
-                    ) {
-                      console.warn(
-                        "⚠️ Tidak terdaftar di allFiles:",
-                        k,
-                        r.attachSurvey[k]
-                      );
-                    }
-                  });
-                }
-
-                return (
-                  <React.Fragment key={r.id || i}>
-                    <div
-                      className="df-row"
-                      role="row"
-                      style={{
-                        alignItems: "start",
-                      }}
-                    >
-                      <div>{i + 1}</div>
-                      <div className="df-mono">{fmtDT(r.waktu)}</div>
-                      <div>{pill(r.template)}</div>
-                      <div>{r.jenisSurveyLabel || r.jenisSurvei || "-"}</div>
-                      <div className="df-mono">{r.noPL || "-"}</div>
-                      <div>{r.korban || "-"}</div>
-                      <div>{r.petugas || "-"}</div>
-                      <div className="df-mono">
-                        {fmtD(r.tanggalKecelakaan || r.tglKecelakaan || r.hariTanggal)}
-                      </div>
-                      <div>{badge(r.status)}</div>
-
-                      {/* Kolom Rating */}
+                    {r.feedback && (
                       <div
+                        title={r.feedback}
                         style={{
-                          minWidth: "0px",
+                          fontSize: "0.85em",
+                          color: "#555",
+                          marginTop: 4,
                           whiteSpace: "normal",
                           wordBreak: "break-word",
-                          padding: "4px 6px",
-                          display: "flex",
-                          flexDirection: "column", // biar feedback di bawah rating
-                          alignItems: "flex-start", // biar rata kiri
                         }}
                       >
-                        {/* Rating */}
-                        <div>
-                          {(() => {
-                            const n = Math.max(0, Math.min(5, parseInt(r.rating, 10) || 0));
-                            return n ? "⭐".repeat(n) + "☆".repeat(5 - n) : "—";
-                          })()}
-                        </div>
-
-                        {/* Feedback */}
-                        {r.feedback && (
-                          <div
-                            title={r.feedback}
-                            style={{
-                              fontSize: "0.85em",
-                              color: "#555",
-                              marginTop: "4px",
-                              whiteSpace: "normal",
-                              wordBreak: "break-word",
-                            }}
-                          >
-                            💬 {r.feedback}
-                          </div>
-                        )}
+                        💬 {r.feedback}
                       </div>
+                    )}
+                  </div>
 
-                      {/* Kolom Aksi */}
-                      <div
-                        className="df-actions"
-                        style={{
-                          display: "flex",
-                          gap: "4px",
-                          justifyContent: "flex-start",
-                          minWidth: "180px",
-                          padding: "2px 4px",
-                        }}
-                      >
-                        <button
-                          className="kawaii-button"
-                          onClick={() => openPreview(r)}
-                        >
-                          👀 Detail
-                        </button>
-                        <button
-                          className="kawaii-button"
-                          onClick={() => openVerify(r)}
-                        >
-                          {r.verified ? "✅ Terverifikasi" : "🗂️ Verifikasi"}
-                        </button>
-                      </div>
-                    </div>
-                  </React.Fragment>
-                );
-              })}
+                  {/* Kolom Aksi */}
+                  <div
+                    className="df-actions"
+                    style={{
+                      display: "flex",
+                      gap: 4,
+                      justifyContent: "flex-start",
+                      minWidth: 180,
+                      padding: "2px 4px",
+                    }}
+                  >
+                    <button className="kawaii-button" onClick={() => openPreview(r)}>
+                      👀 Detail
+                    </button>
+                    <button className="kawaii-button" onClick={() => openVerify(r)}>
+                      {r.verified ? "✅ Terverifikasi" : "🗂️ Verifikasi"}
+                    </button>
+                  </div>
+                </div>
+              </React.Fragment>
+            ))}
             </div>
           </div>
         )}
@@ -4066,6 +3764,40 @@ export default function DataForm() {
 
     `}
       </style>
+      {/* ✅ TARUH TOAST DI SINI (tepat sebelum </div> terakhir) */}
+    {toast && (
+      <div
+        className={`toast ${toast.type}`}
+        onAnimationEnd={() => setToast(null)}
+        style={{
+          position: "fixed",
+          right: 16,
+          bottom: 16,
+          background: toast.type === "error" ? "#ffe5e5" : "#e8fff0",
+          color: toast.type === "error" ? "#a30f2d" : "#0f7a4c",
+          border: "1px solid",
+          borderColor: toast.type === "error" ? "#ffb8b8" : "#bfead5",
+          padding: "10px 14px",
+          borderRadius: 10,
+          fontWeight: 600,
+          boxShadow: "0 6px 18px rgba(0,0,0,0.12)",
+          animation: "toastHide 2.2s ease forwards",
+          zIndex: 9999,
+        }}
+      >
+        {toast.msg}
+      </div>
+    )}
+
+    {/* ✅ keyframes juga taruh di bawahnya, SEBELUM </div> terakhir */}
+    <style>{`
+      @keyframes toastHide {
+        0% { opacity: 0; transform: translateY(8px); }
+        10% { opacity: 1; transform: translateY(0); }
+        85% { opacity: 1; }
+        100% { opacity: 0; transform: translateY(8px); }
+      }
+    `}</style>
     </div>
   );
 }

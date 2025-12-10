@@ -80,16 +80,23 @@ async function kirimKeSupabase(formData) {
   console.log("📤 Payload ke Supabase:", record);
 
   // ===== INSERT =====
-  const { error } = await supabase.from("dataform").insert([record]);
+  const { error } = await supabase
+    .from("dataform")
+    .upsert([record], { onConflict: "local_id" });
 
   if (error) {
-    console.error("❌ Supabase insert error:", {
-      message: error.message, details: error.details, hint: error.hint, code: error.code, sent: record,
+    console.error("❌ Supabase upsert error detail:", {
+      message: error.message,
+      details: error.details,
+      hint: error.hint,
+      code: error.code,
     });
-    alert("Insert gagal. Cek console (message/details/hint) untuk kolom yang bentrok 🙏");
-  } else {
-    console.log("✅ Tersimpan di Supabase");
+    alert("Gagal simpan ke server 🙏");
+    return false;
   }
+
+  console.log("✅ Tersimpan di Supabase");
+  return true;
 }
 
 /* ============================================
@@ -285,6 +292,7 @@ function shrinkRecordOnce(rec) {
 export default function Step5({ data = {}, setData, back, setStep }) {
   const setRating = (v) => setData?.({ ...data, rating: v });
   const [burstKey, setBurstKey] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const showKawaiiAlert = (text, type = "success") => {
     const msg = document.createElement("div");
@@ -318,30 +326,23 @@ export default function Step5({ data = {}, setData, back, setStep }) {
     }, 2500);
   };
 
-  const handleSubmit = useCallback(async() => {
+  const handleSubmit = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+
     try {
       console.log("📦 Sebelum simpan:", localStorage.getItem("formDataList"));
 
+      // self-heal kalau formDataList masih object
       try {
         const raw0 = localStorage.getItem("formDataList");
         if (raw0) {
           const parsed0 = JSON.parse(raw0);
-          if (
-            parsed0 &&
-            !Array.isArray(parsed0) &&
-            typeof parsed0 === "object"
-          ) {
+          if (parsed0 && !Array.isArray(parsed0) && typeof parsed0 === "object") {
             localStorage.setItem("formDataList", JSON.stringify([parsed0]));
           }
         }
       } catch {}
-
-      const jenisSurveiLabel = {
-        keterjaminan: "Keterjaminan Korban",
-        keabsahan_waris: "Keabsahan Ahli Waris",
-        keabsahan_biaya: "Keabsahan Biaya Perawatan",
-        lainnya: data.jenisSurveiLainnya || "Lainnya",
-      };
 
       const sifatStr = `${data.sifatCidera || ""} ${data.jenisSurvei || ""} ${
         data.jenisSurveyLabel || ""
@@ -349,10 +350,6 @@ export default function Step5({ data = {}, setData, back, setStep }) {
 
       const hasLL = /(?:\bll\b|luka)/i.test(sifatStr);
       const hasMD = /(?:\bmd\b|meninggal)/i.test(sifatStr);
-
-      console.log("🧩 sifatCidera:", data.sifatCidera);
-      console.log("🧩 jenisSurvei:", data.jenisSurvei);
-      console.log("🧩 jenisSurveyLabel:", data.jenisSurveyLabel);
 
       const inferredTemplate =
         data.template ||
@@ -364,8 +361,10 @@ export default function Step5({ data = {}, setData, back, setStep }) {
         keabsahan_biaya: "Keabsahan Biaya Perawatan",
         lainnya: data.jenisSurveiLainnya || "Lainnya",
       };
-      const jenisSurveiSlug   = data.jenisSurvei || null;
-      const jenisSurveyLabel  = data.jenisSurveyLabel || (jenisSurveiSlug ? labelBySlug[jenisSurveiSlug] : null);
+      const jenisSurveiSlug = data.jenisSurvei || null;
+      const jenisSurveyLabel =
+        data.jenisSurveyLabel ||
+        (jenisSurveiSlug ? labelBySlug[jenisSurveiSlug] : null);
 
       const newDataRaw = {
         ...data,
@@ -378,7 +377,8 @@ export default function Step5({ data = {}, setData, back, setStep }) {
           hour: "2-digit",
           minute: "2-digit",
         }),
-        jenisSurvei: jenisSurveiSlug, jenisSurveyLabel,
+        jenisSurvei: jenisSurveiSlug,
+        jenisSurveyLabel,
         status: "terkirim",
         template: inferredTemplate,
         att: data.att || {},
@@ -386,10 +386,8 @@ export default function Step5({ data = {}, setData, back, setStep }) {
         laporanRSList: data.laporanRSList || [],
       };
 
-      // Tambahkan hasil cetak (jika ada)
       if (data.hasilFormFile) newDataRaw.hasilFormFile = data.hasilFormFile;
 
-      // Merge lampiran (attach)
       const mergedAttach = {
         ...(data.attachSurvey || {}),
         fotoSurveyList: data.fotoSurveyList || [],
@@ -416,33 +414,41 @@ export default function Step5({ data = {}, setData, back, setStep }) {
       );
 
       const newData = sanitizeRecordForStorage(newDataRaw);
+
       const res = appendRecord("formDataList", newData);
       if (!res.ok) {
-        alert(
-          "Penyimpanan penuh. Data lama tetap aman. Hapus beberapa entri/lampiran lalu coba lagi ya 💖"
-        );
+        alert("Penyimpanan penuh. Data lama tetap aman ya 💖");
         return;
       }
 
       localStorage.setItem("formDataLastId", newData.id);
-      const now = new Date();
-      const waktuISO = now.toISOString(); 
 
-      await kirimKeSupabase({
+      // kirim ke server cuma sekali
+      const okInsert = await kirimKeSupabase({
         localId: newData.id,
         waktu: new Date().toISOString(),
-        template: inferredTemplate,              // "kunjungan_rs" / "survei_ll" / "survei_md"
-        jenisSurvei: data.jenisSurvei,           // wajib untuk survei, abaikan untuk kunjungan
-        jenisSurveyLabel: data.jenisSurveyLabel, // optional
-        noPL: data.noPL || data.noBerkas || data.noLP, // wajib untuk survei
+        template: inferredTemplate,
+        jenisSurvei: data.jenisSurvei,
+        jenisSurveyLabel: data.jenisSurveyLabel,
+        noPL: data.noPL || data.noBerkas || data.noLP,
         korban: data.korban || data.namaKorban,
         petugas: data.petugas || data.petugasSurvei,
         tanggalKecelakaan: data.tanggalKecelakaan || data.tglKecelakaan,
-        attachList: newData.attachList,          // biar bisa hitung berkas
+        attachList: newData.attachList,
         status: "terkirim",
         rating: data.rating,
         feedback: data.feedback,
       });
+
+      if (!okInsert) {
+        showKawaiiAlert("Gagal simpan ke server, data masih aman di local 😭", "error");
+        return;
+      }
+
+      // sukses → bersihkan local
+      localStorage.removeItem("formDataList");
+      localStorage.removeItem("formDataLastId");
+      localStorage.removeItem("draftForm");
 
       const resetByTemplate = (tpl) =>
         String(tpl || "").startsWith("survei_")
@@ -490,12 +496,15 @@ export default function Step5({ data = {}, setData, back, setStep }) {
         feedback: "",
         template: "",
       });
+
       showKawaiiAlert("Data berhasil disimpan!", "success");
     } catch (err) {
       console.error("❌ Gagal menyimpan data:", err);
       showKawaiiAlert("Gagal menyimpan data 😭", "error");
+    } finally {
+      setSaving(false);
     }
-  }, [data]);
+  }, [data, saving, setData, setStep]);
 
   const caption = useMemo(() => {
     const f = faces.find((x) => x.v === data.rating);
