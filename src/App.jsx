@@ -30,10 +30,6 @@ export default function App() {
         <header className="navbar">
           <div className="nav-left">
             <img src="/logo.png" alt="Jasa Raharja" className="logo" />
-            <div className="brand">
-              <span className="brand-title">JASA RAHARJA</span>
-              <span className="brand-sub">A member of IFG</span>
-            </div>
           </div>
 
           <nav className="nav-links">

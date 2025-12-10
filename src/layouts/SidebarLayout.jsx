@@ -29,10 +29,6 @@ export default function SidebarLayout() {
         <div className="sb-top">
           <div className="sb-brand">
             <img src="/logo.png" alt="JR" className="sb-logo" />
-            <div className="sb-brand-text">
-              <div className="sb-title">JASA RAHARJA</div>
-              <div className="sb-sub">A member of IFG</div>
-            </div>
           </div>
 
           <button

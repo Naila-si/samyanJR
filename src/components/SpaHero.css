@@ -1,0 +1,225 @@
+/* =========================
+   HERO (desktop)
+   ========================= */
+.hero {
+  position: relative;
+  width: 100%;
+  min-height: auto;          /* jangan dipaksa 1 layar dulu */
+  padding: 18px 64px 48px;   /* atas kecil, bawah tetap lega */
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 36px;
+  align-items: start;        /* <-- NAH ini: biar nempel atas */
+  background: #fff;
+  overflow-x: hidden;
+}
+
+.hero-text h1 {
+  font-size: clamp(32px, 4vw, 56px);
+  line-height: 1.1;
+  margin: 0 0 14px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+
+.subtext {
+  font-size: clamp(14px, 1.2vw, 18px);
+  line-height: 1.7;
+  color: var(--muted);
+  margin-bottom: 18px;
+  max-width: 650px;
+}
+
+.cta {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: none;
+  background: linear-gradient(135deg, #ffeff6, #f0f7ff, #effff1);
+  font-weight: 800;
+  color: #7a2e5a;
+  text-align: left;
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  max-width: 520px;
+}
+
+.cta-sub {
+  font-size: 0.9em;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+/* =========================
+   HERO IMAGES
+   ========================= */
+.hero-images {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: center;
+  background: var(--card);
+  padding: 10px;
+  border-radius: 20px;
+}
+
+.hero-images img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 18px;
+  box-shadow: 0 10px 22px rgba(0,0,0,.12);
+  transition: transform .2s ease;
+}
+
+.hero-images img:hover {
+  transform: translateY(-2px) scale(1.02);
+}
+
+/* Optional animasi kalau kamu mau */
+.anim-img {
+  opacity: 0;
+  animation: fadeInUp 0.8s ease-out forwards, floatY 6s ease-in-out 1s infinite alternate;
+}
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes floatY {
+  from { transform: translateY(0); }
+  to   { transform: translateY(-10px); }
+}
+
+/* =========================
+   CHATBOT
+   ========================= */
+.chatbot {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: min(360px, 92vw);
+  max-height: 70vh;
+  background: #fff;
+  border: 1.5px solid #ffd3e6;
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgba(0,0,0,.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 9999;
+}
+
+.chatbot.collapsed { height: auto; max-height: unset; }
+
+.chatbot-header {
+  background: #fff5fa;
+  padding: 10px 12px;
+  font-weight: 800;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chatbot-toggle {
+  background: transparent;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.chatbot-messages {
+  padding: 10px;
+  overflow-y: auto;
+  flex: 1;
+  background: #fff;
+}
+
+.bubble {
+  max-width: 85%;
+  padding: 8px 10px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.bubble.bot {
+  background: #f3f7ff;
+  align-self: flex-start;
+}
+
+.bubble.user {
+  background: #ffeaf3;
+  align-self: flex-end;
+  margin-left: auto;
+}
+
+.chatbot-input {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px dashed #ffd1e6;
+  background: #fff;
+}
+
+.chatbot-input input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #eee;
+  outline: none;
+  font-size: 14px;
+}
+
+.chatbot-input button {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: #ec4899;
+  color: white;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* =========================
+   MOBILE
+   ========================= */
+@media (max-width: 768px) {
+  .hero {
+    grid-template-columns: 1fr;
+    padding: 22px 18px 120px;
+    gap: 18px;
+    text-align: center;
+    min-height: auto;
+  }
+
+  .hero-images { gap: 10px; }
+  .hero-images img {
+    border-radius: 14px;
+    aspect-ratio: 1 / 1.2;
+  }
+
+  .chatbot {
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: 55vh;
+  }
+
+  .notif-pks-btn {
+    left: 10px !important;
+    bottom: 72px !important;
+    transform: scale(0.95);
+  }
+}
+
+@media (max-width: 420px) {
+  .bubble { font-size: 13px; }
+  .chatbot-input input { font-size: 13px; }
+}
