@@ -1844,3 +1844,118 @@ body{
   background: #30a46c;
   color: white;
 }
+
+/* =========================
+   LOGIN RESPONSIVE OVERRIDE
+   taruh PALING BAWAH
+   ========================= */
+
+/* tablet kebawah */
+@media (max-width: 920px){
+  .login-card{
+    width: min(560px, 96vw);
+    gap: 0;                 /* biar rapet */
+  }
+  .login-aside{
+    border-right: 0;
+    border-bottom: 1px dashed #ffd1d6;
+  }
+}
+
+/* hp */
+@media (max-width: 640px){
+
+  .login-page{
+    min-height: 100vh;      /* jangan tergantung navbar */
+    padding: 16px 12px 28px;
+    place-items: start center;
+  }
+
+  .login-card{
+    width: 100%;
+    grid-template-columns: 1fr;
+    border-radius: 16px;
+  }
+
+  .login-aside{
+    padding: 18px 16px;
+  }
+  .login-title{
+    font-size: 20px;
+    line-height: 1.2;
+  }
+  .login-aside .muted{
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  /* role chips biar ga mepet dan bisa scroll */
+  .role-chips{
+    gap: 8px;
+    flex-wrap: nowrap;          /* satu baris */
+    overflow-x: auto;           /* bisa geser */
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .role-chips::-webkit-scrollbar{ display:none; }
+
+  .role-chip{
+    white-space: nowrap;
+    font-size: 13px;
+    padding: 7px 10px;
+  }
+
+  .login-points{
+    font-size: 12.5px;
+  }
+
+  .login-form{
+    padding: 18px 16px 20px;
+    gap: 8px;
+  }
+
+  .field label{
+    font-size: 13px;
+  }
+
+  /* input enak jempol + iOS no zoom */
+  .field input{
+    font-size: 16px;
+    padding: 12px 12px;
+    border-radius: 12px;
+    min-height: 48px;
+  }
+
+  .input-pass input{
+    padding-right: 52px;
+  }
+  .toggle-pass{
+    right: 10px;
+    font-size: 20px;
+  }
+
+  .remember{
+    font-size: 13px;
+    gap: 6px;
+  }
+
+  .btn-primary.btn-large{
+    width: 100%;
+    min-height: 50px;
+    font-size: 16px;
+    border-radius: 14px;
+  }
+
+  .help{
+    font-size: 12px;
+    line-height: 1.5;
+  }
+}
+
+/* hp super kecil */
+@media (max-width: 420px){
+  .login-aside{ padding: 16px 14px; }
+  .login-form{ padding: 16px 14px 18px; }
+  .login-title{ font-size: 18px; }
+  .role-chip{ font-size: 12px; }
+}
