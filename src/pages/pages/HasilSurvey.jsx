@@ -794,14 +794,6 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       {/* LAMPIRAN */}
       <section className="card">
         <div className="label">Lampiran</div>
-        <p className="lampiran-hint">
-          Untuk mendukung hasil survei, <strong>disarankan</strong> mengunggah dokumen seperti
-          <strong> KTP</strong>, <strong>KK</strong>, <strong>Akta Kelahiran</strong>,
-          <strong> Buku Tabungan</strong>, dan formulir terkait jika sudah tersedia.
-          Kalau belum lengkap, survei tetap bisa dilanjutkan selama
-          <strong> Foto Survei</strong>, <strong> SS Peta/Map</strong>, <strong> Barcode/QR</strong>,
-          dan <strong> TTD Petugas</strong> sudah diunggah.
-        </p>
         {sifatCidera === "MD" && (
           <div className="grid-attach">
             {/* KTP */}
