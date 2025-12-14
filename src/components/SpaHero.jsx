@@ -479,12 +479,11 @@ function NotifPKS() {
     setLoading(true);
     const { data, error } = await supabase
       .from("datapks")
-      .select(
-        `
-    *,
-    tglAkhir:tgl_akhir
-  `
-      )
+      .select(`
+        *,
+        tglAkhir:tgl_akhir,
+        namaRS:nama_rs
+      `)
       .order("tgl_akhir", { ascending: true });
 
     if (!error && data) recomputeFromRows(data);
