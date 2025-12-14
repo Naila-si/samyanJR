@@ -1741,6 +1741,11 @@ export default function DataForm() {
   }
 
   async function buildPreviewHTML_LL(vv, objURL) {
+    console.log("🟢 LL DEBUG (inside builder):", {
+      fotoSurveyList: vv.fotoSurveyList,
+      attachSurvey: vv.attachSurvey,
+      files: vv.files,
+    });
     const escapeHtml = (str = "") =>
       String(str)
         .replace(/&/g, "&amp;")
@@ -1787,12 +1792,43 @@ export default function DataForm() {
     // 1) LAMPIRAN LL (MAP + BARCODE + FOTO SURVEY AJA)
     // =========================
     const filePages = [];
+    if (Array.isArray(vv.files)) {
+      const surveyFiles = vv.files.filter((f) =>
+        /survey/i.test(f.label || f.jenis || f.name || f.fileName || "")
+      );
+
+      for (const f of surveyFiles) {
+        const src = await toDataURL(f);
+        if (!src) continue;
+
+        // cegah duplikat
+        if (filePages.some(p => p.includes(src))) continue;
+
+        filePages.push(`
+          <div class="lampiran-page">
+            <img src="${src}" class="lampiran-img" />
+          </div>
+        `);
+      }
+    }
+    if (Array.isArray(vv.fotoSurveyList) && vv.fotoSurveyList.length) {
+      for (const f of vv.fotoSurveyList) {
+        const src = await toDataURL(f);
+        if (!src) continue;
+
+        filePages.push(`
+          <div class="lampiran-page">
+            <img src="${src}" class="lampiran-img" />
+          </div>
+        `);
+      }
+    }
     const att = vv.attachSurvey || {};
     const attKeys = Object.keys(att);
     const skipKeyRegex = /ttd|tanda\s*tangan|signature|sumber[-_\s]*informasi/i;
 
       // kalau attachSurvey ada → pakai
-      if (attKeys.length > 0) {
+      if (attKeys.length > 0 && filePages.length === 0) {
         const order = ["mapSS", "barcode", "fotoSurvey"];
         const ordered = [...order.filter((k) => k in att).map((k) => [k, att[k]])];
 
@@ -2548,7 +2584,7 @@ export default function DataForm() {
     return allFiles;
   }
 
-  function pickNearestCluster(files, recordTime, windowMs = 5*60*1000, gapMs = 60*1000) {
+  function pickNearestCluster(files, recordTime, windowMs = 2*60*1000, gapMs = 60*1000) {
     const within = files
       .filter(f => f.timestamp && Math.abs(f.timestamp - recordTime) <= windowMs)
       .sort((a,b) => a.timestamp - b.timestamp);
@@ -2739,7 +2775,7 @@ if (picked.length > 0) {
     // 1) coba window ±5 menit dulu
     let sumberInfoFiles = allSumberFiles.filter(f => {
       const diff = Math.abs(f.timestamp - recordTime);
-      return diff <= (15 * 60 * 1000);
+      return diff <= (2 * 60 * 1000);
     });
 
     // 2) kalau kosong, ambil cluster terdekat seperti survey
