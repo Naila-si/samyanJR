@@ -1,4 +1,10 @@
-import React, { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import React, {
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+} from "react";
 import { Toaster, toast } from "react-hot-toast";
 import Step1 from "./Step1";
 import Step2 from "./Step2";
@@ -18,12 +24,17 @@ const STEPS = [
 function StepAudio({ step, enabled = true }) {
   if (!enabled) return null;
   const src =
-    step === 1 ? "/voices/Step1.mp3" :
-      step === 2 ? "/voices/Step2.mp3" :
-        step === 3 ? "/voices/Step3.mp3" :
-          step === 4 ? "/voices/Step4.mp3" :
-            step === 5 ? "/voices/Step5.mp3" :
-              null;
+    step === 1
+      ? "/voices/Step1.mp3"
+      : step === 2
+      ? "/voices/Step2.mp3"
+      : step === 3
+      ? "/voices/Step3.mp3"
+      : step === 4
+      ? "/voices/Step4.mp3"
+      : step === 5
+      ? "/voices/Step5.mp3"
+      : null;
   if (!src) return null;
   return (
     <audio key={step} autoPlay playsInline>
@@ -148,15 +159,15 @@ export default function FormPage() {
         minute: "2-digit",
       }),
       status: "diproses",
-      fotoList: data.fotoList || [], 
-      rsList: data.rsList || [],    
+      fotoList: data.fotoList || [],
+      rsList: data.rsList || [],
       totalFiles: (data.fotoList?.length || 0) + (data.rsList?.length || 0),
       counts: {
         singles: data.rsList?.length || 0,
         fotoSurvey: data.fotoList?.length || 0,
         fotoKejadian: 0,
       },
-  };
+    };
     const updated = [...existing, newData];
     localStorage.setItem("formDataList", JSON.stringify(updated));
     setData({
@@ -183,87 +194,101 @@ export default function FormPage() {
   }, [data, playBeep, sparkle]);
 
   // ===== Validasi per step =====
-const validateStep = useCallback(() => {
-  switch (step) {
-    case 1:
-      if (!data.petugas?.trim() || !data.korban?.trim() || !data.tanggalKecelakaan) {
-        toast.error("Mohon isi semua data pada langkah 1 (Petugas, Korban, dan Tanggal Kecelakaan).");
-        return false;
-      }
-      return true;
-
-    case 2:
-      const templateName2 = data.template?.toLowerCase();
-
-      if (!data.template) {
-        toast.error("Pilih template dokumen terlebih dahulu pada langkah 2.");
-        return false;
-      }
-
-      if (templateName2.includes("survey")) {
-        if (!data.sifatCidera?.trim()) {
-          toast.error("Pilih sifat cidera terlebih dahulu sebelum lanjut.");
+  const validateStep = useCallback(() => {
+    switch (step) {
+      case 1:
+        if (
+          !data.petugas?.trim() ||
+          !data.korban?.trim() ||
+          !data.tanggalKecelakaan
+        ) {
+          toast.error(
+            "Mohon isi semua data pada langkah 1 (Petugas, Korban, dan Tanggal Kecelakaan)."
+          );
           return false;
         }
-      }
+        return true;
 
-      return true;
+      case 2:
+        const templateName2 = data.template?.toLowerCase();
 
-    case 3:
-      console.log("🔍 Step 3 Validation, template:", data.template);
-
-      const templateName = data.template?.toLowerCase();
-
-      if (templateName.includes("survey")) {
-        const requiredSurveyFields = [
-          "noPL",
-          "alamatKorban",
-          "uraianSurvei",
-          "kesimpulanSurvei",
-          "noBerkas",
-          "tempatKecelakaan",
-          "hubunganSesuai",
-        ];
-        const missing = requiredSurveyFields.filter((key) => !data[key]?.trim());
-        if (missing.length > 0) {
-          console.warn("❌ Field kosong di SURVEY:", missing);
-          toast.error("Lengkapi semua kolom Hasil Survey terlebih dahulu.");
+        if (!data.template) {
+          toast.error("Pilih template dokumen terlebih dahulu pada langkah 2.");
           return false;
         }
-      } else if (templateName.includes("kunjungan")) {
-        const requiredKunjunganFields = [
-          "rumahSakit",
-          "tglJamKunjungan",
-          "uraianKunjungan",
-          "rekomendasi",
-          "wilayah",
-          "lokasiKecelakaan",
-          "tglKecelakaan",
-          "tglMasukRS",
-          // "tglJamNotifikasi",
-        ];
-        const missing = requiredKunjunganFields.filter((key) => !data[key]?.trim());
-        if (missing.length > 0) {
-          console.warn("❌ Field kosong di KUNJUNGAN:", missing);
-          toast.error("Lengkapi semua kolom Hasil Kunjungan terlebih dahulu.");
+
+        if (templateName2.includes("survey")) {
+          if (!data.sifatCidera?.trim()) {
+            toast.error("Pilih sifat cidera terlebih dahulu sebelum lanjut.");
+            return false;
+          }
+        }
+
+        return true;
+
+      case 3:
+        console.log("🔍 Step 3 Validation, template:", data.template);
+
+        const templateName = data.template?.toLowerCase();
+
+        if (templateName.includes("survey")) {
+          const requiredSurveyFields = [
+            "noPL",
+            "alamatKorban",
+            "uraianSurvei",
+            "kesimpulanSurvei",
+            "noBerkas",
+            "tempatKecelakaan",
+            "hubunganSesuai",
+          ];
+          const missing = requiredSurveyFields.filter(
+            (key) => !data[key]?.trim()
+          );
+          if (missing.length > 0) {
+            console.warn("❌ Field kosong di SURVEY:", missing);
+            toast.error("Lengkapi semua kolom Hasil Survey terlebih dahulu.");
+            return false;
+          }
+        } else if (templateName.includes("kunjungan")) {
+          const requiredKunjunganFields = [
+            "rumahSakit",
+            "tglJamKunjungan",
+            "uraianKunjungan",
+            "rekomendasi",
+            "wilayah",
+            "lokasiKecelakaan",
+            "tglKecelakaan",
+            "tglMasukRS",
+            // "tglJamNotifikasi",
+          ];
+          const missing = requiredKunjunganFields.filter(
+            (key) => !data[key]?.trim()
+          );
+          if (missing.length > 0) {
+            console.warn("❌ Field kosong di KUNJUNGAN:", missing);
+            toast.error(
+              "Lengkapi semua kolom Hasil Kunjungan terlebih dahulu."
+            );
+            return false;
+          }
+        }
+
+        return true;
+
+      case 4:
+        if (data.isSurvey) return true;
+        if (!data.mlResult || Object.keys(data.mlResult).length === 0) {
+          toast.error(
+            "Pastikan hasil validasi (ML Result) sudah ada sebelum lanjut."
+          );
           return false;
         }
-      }
+        return true;
 
-      return true;
-
-    case 4:
-      if (data.isSurvey) return true;
-      if (!data.mlResult || Object.keys(data.mlResult).length === 0) {
-        toast.error("Pastikan hasil validasi (ML Result) sudah ada sebelum lanjut.");
-        return false;
-      }
-      return true;
-
-    default:
-      return true;
-  }
-}, [step, data]);
+      default:
+        return true;
+    }
+  }, [step, data]);
 
   // ===== Nav helpers =====
   const next = useCallback(() => {
@@ -374,7 +399,7 @@ function Header({ step, goTo, soundEnabled, toggleSound }) {
   const progress = ((step - 1) / 4) * 100;
   return (
     <header className="page-header">
-      <h1 className="title">Sistem Administrasi Pelayanan (SAMYAN)</h1>
+      <h1 className="title">VERIFIKASI & ADMINISTRASI (VERINA)</h1>
 
       <div className="stepper" role="tablist" aria-label="Langkah Form">
         {STEPS.map((s, i) => {

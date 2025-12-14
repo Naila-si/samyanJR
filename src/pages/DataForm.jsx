@@ -3382,7 +3382,7 @@ if (picked.length > 0) {
                 <div>Waktu</div>
                 <div>Template</div>
                 <div>Jenis Survei</div>
-                <div>No. LP</div>
+                <div>No. Survei</div>
                 <div>Korban</div>
                 <div>Petugas</div>
                 <div>Tgl. Kejadian</div>

@@ -10,9 +10,9 @@ const SUPPORT_WHATSAPP_URL = "https://wa.me/62XXXXXXXXXXX"; // ✅ GANTI ke nomo
 const FAQ_ANSWERS = [
   /* --- Paling sering --- */
   {
-    keywords: ["apa itu samyan", "samyan itu", "definisi", "pengertian", "fungsi samyan"],
+    keywords: ["apa itu verina", "verina itu", "definisi", "pengertian", "fungsi verina"],
     answer:
-      "SAMYAN (Sistem Administrasi Pelayanan) adalah platform untuk mengelola data & dokumen layanan agar proses lebih cepat, terdokumentasi, dan mengurangi penggunaan kertas.",
+      "VERINA (Verikasi &) adalah platform untuk mengelola data & dokumen layanan agar proses lebih cepat, terdokumentasi, dan mengurangi penggunaan kertas.",
   },
   {
     keywords: ["cara daftar", "registrasi", "daftar", "mendaftar", "buat akun"],

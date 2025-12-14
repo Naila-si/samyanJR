@@ -128,20 +128,20 @@ const FAQ_ANSWERS = [
       "assalamualaikum",
     ],
     answer:
-      "Halo! Ada yang bisa saya bantu seputar SAMYAN? Coba tanya tentang registrasi, form, dokumen, status, atau jam layanan.",
+      "Halo! Ada yang bisa saya bantu seputar Verina? Coba tanya tentang registrasi, form, dokumen, status, atau jam layanan.",
   },
 
   // Inti
   {
     keywords: [
-      "apa itu samyan",
-      "samyan itu",
+      "apa itu Verina",
+      "Verina itu",
       "definisi",
       "pengertian",
-      "fungsi samyan",
+      "fungsi Verina",
     ],
     answer:
-      "SAMYAN (Sistem Administrasi Pelayanan) adalah platform untuk mengelola data & dokumen layanan agar proses lebih cepat, terdokumentasi, dan mengurangi penggunaan kertas.",
+      "VERINA (Verifikasi & Administrasi) adalah platform untuk mengelola data & dokumen layanan agar proses lebih cepat, terdokumentasi, dan mengurangi penggunaan kertas.",
   },
   {
     keywords: ["registrasi", "cara daftar", "buat akun", "mendaftar"],
@@ -262,7 +262,7 @@ const FAQ_ANSWERS = [
   {
     keywords: ["biaya", "tarif", "pungutan", "gratis", "bayar"],
     answer:
-      "Layanan melalui SAMYAN **tidak dipungut biaya**. Waspada pihak yang meminta pembayaran di luar ketentuan.",
+      "Layanan melalui Verina **tidak dipungut biaya**. Waspada pihak yang meminta pembayaran di luar ketentuan.",
   },
 
   // Operasional & bantuan
@@ -274,7 +274,7 @@ const FAQ_ANSWERS = [
   {
     keywords: ["bantuan", "helpdesk", "kontak", "hubungi", "call center"],
     answer:
-      "Bantuan: hubungi admin melalui email helpdesk@samyan.local atau ext. 1234 pada jam kerja.",
+      "Bantuan: hubungi admin melalui email helpdesk@Verina.local atau ext. 1234 pada jam kerja.",
   },
 
   // Jarang tapi penting
@@ -361,7 +361,7 @@ atau datang ke kantor kami di Jl. Jend. Sudirman No.285, Simpang Empat, Kec. Pek
 function ChatbotSPA() {
   const [open, setOpen] = useState(true);
   const [messages, setMessages] = useState([
-    { sender: "bot", text: "Halo! Aku asisten SAMYAN. Mau tanya apa?" },
+    { sender: "bot", text: "Halo! Aku asisten Verina. Mau tanya apa?" },
   ]);
   const [input, setInput] = useState("");
   const endRef = useRef(null);
@@ -386,7 +386,7 @@ function ChatbotSPA() {
   return (
     <div className={`chatbot ${open ? "" : "collapsed"}`}>
       <div className="chatbot-header">
-        <span>Chatbot SAMYAN</span>
+        <span>Chatbot Verina</span>
         <button className="chatbot-toggle" onClick={() => setOpen((o) => !o)}>
           {open ? "—" : "Chat"}
         </button>
@@ -479,11 +479,13 @@ function NotifPKS() {
     setLoading(true);
     const { data, error } = await supabase
       .from("datapks")
-      .select(`
+      .select(
+        `
         *,
         tglAkhir:tgl_akhir,
         namaRS:nama_rs
-      `)
+      `
+      )
       .order("tgl_akhir", { ascending: true });
 
     if (!error && data) recomputeFromRows(data);
@@ -790,13 +792,13 @@ export default function SpaHero() {
 
       <div className="hero-text">
         <h1>
-          SISTEM ADMINISTRASI
+          VERIFIKASI &
           <br />
-          PELAYANAN <br />
-          (SAMYAN)
+          ADMINISTRASI <br />
+          (VERINA)
         </h1>
         <p className="subtext">
-          Sistem Administrasi Pelayanan yang mempermudah pengelolaan data dan
+          Sistem Verifikasi & Administrasi ini membantu mempermudah pengelolaan data dan
           dokumen santunan, mengurangi ketergantungan pada proses manual untuk
           meningkatkan efisiensi dan efektivitas Sistem Pelayanan secara
           digitalisasi.

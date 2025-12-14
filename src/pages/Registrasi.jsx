@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 const DEMO = {
-  reg: { email: "admin.reg@spa.id", password: "admin123" },
-  ver: { email: "admin.ver@spa.id", password: "admin123" },
+  reg: { email: "registrasi@samyan.id", password: "reg2025!" },
+  ver: { email: "verifikator@samyan.id", password: "ver2025!" },
 };
 
 export default function Registrasi() {
@@ -19,9 +19,9 @@ export default function Registrasi() {
   const [rolePick, setRolePick] = useState("");
 
   const fillDemo = (which) => {
-    setRolePick(which);
-    const { email, password } = DEMO[which];
-    setForm((s) => ({ ...s, email, password }));
+    // setRolePick(which);
+    // const { email, password } = DEMO[which];
+    // setForm((s) => ({ ...s, email, password }));
   };
 
   // --- NEW: tentukan landing page per role
@@ -91,7 +91,7 @@ export default function Registrasi() {
           <h1 className="login-title">Login Admin</h1>
           <p className="muted">
             Masuk sebagai <b>Admin Registrasi</b> atau <b>Admin Verifikator</b> untuk
-            mengelola berkas dan proses SPA.
+            mengelola berkas dan proses VERINA.
           </p>
 
           <div className="role-chips">
@@ -114,9 +114,9 @@ export default function Registrasi() {
           </div>
 
           <ul className="login-points">
-            <li>Keamanan akun dengan sesi tersimpan (ingat saya).</li>
+            <li>Keamanan akun.</li>
             <li>Akses berbeda sesuai peran (registrasi / verifikasi).</li>
-            <li>UI cepat, ringan, dan responsif.</li>
+            {/* <li>UI cepat, ringan, dan responsif.</li> */}
           </ul>
         </aside>
 
@@ -128,7 +128,7 @@ export default function Registrasi() {
             <label>Email</label>
             <input
               type="email"
-              placeholder="admin.reg@spa.id / admin.ver@spa.id"
+              placeholder="Ketik email kamu"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
               autoComplete="username"
@@ -170,9 +170,9 @@ export default function Registrasi() {
             {submitting ? "Memproses..." : "Masuk"}
           </button>
 
-          <div className="help muted small">
+          {/* <div className="help muted small">
             Tips: klik chip peran di kiri untuk mengisi email & password demo otomatis.
-          </div>
+          </div> */}
         </form>
       </div>
     </div>
