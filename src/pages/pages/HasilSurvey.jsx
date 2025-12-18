@@ -23,14 +23,22 @@ function fmtDate(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (isNaN(d)) return iso;
-  return d.toLocaleDateString("id-ID", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return d.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
 }
 function fmtDateTime(iso) {
   if (!iso) return "-";
   const d = new Date(iso);
   if (isNaN(d)) return iso;
   return d.toLocaleString("id-ID", {
-    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
   });
 }
 function escapeHtml(str = "") {
@@ -101,7 +109,9 @@ function Mic({ onText, title = "Dikte" }) {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return alert("Browser belum mendukung Speech Recognition.");
     if (recRef.current) {
-      try { recRef.current.abort(); } catch {}
+      try {
+        recRef.current.abort();
+      } catch {}
       recRef.current = null;
     }
     const r = new SR();
@@ -114,7 +124,13 @@ function Mic({ onText, title = "Dikte" }) {
     r.start();
   };
   return (
-    <button type="button" className="btn mic" onClick={start} title={title} aria-label="Dikte">
+    <button
+      type="button"
+      className="btn mic"
+      onClick={start}
+      title={title}
+      aria-label="Dikte"
+    >
       🎤
     </button>
   );
@@ -125,97 +141,335 @@ function Mic({ onText, title = "Dikte" }) {
   ========================================================= */
 const VEHICLE_DB = {
   "BM-1520-EM": {
-    noPolisi:"BM-1520-EM", pemilik:"DIAN WAHYUNI ESMAN", tglMati:"2024-08-28",
-    gol:"DP", alamat:"JL. PERTANIAN NO. 13 RT. 003 RW. 002 DURI BARAT MANDAU BENGKALIS",
-    hp:"0", nik:"1403095405784695", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+    noPolisi: "BM-1520-EM",
+    pemilik: "DIAN WAHYUNI ESMAN",
+    tglMati: "2024-08-28",
+    gol: "DP",
+    alamat: "JL. PERTANIAN NO. 13 RT. 003 RW. 002 DURI BARAT MANDAU BENGKALIS",
+    hp: "0",
+    nik: "1403095405784695",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1707-ZD": { noPolisi:"BM-1707-ZD", pemilik:"WIDYO SUDIRO", tglMati:"2024-08-03", gol:"DP",
-    alamat:"DUSUN LUBUK BARU RT/RW 001/001 MEKAR JAYA KEC. KAMPAR KIRI TENGAH", hp:"", nik:"1401190508610001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-1707-ZD": {
+    noPolisi: "BM-1707-ZD",
+    pemilik: "WIDYO SUDIRO",
+    tglMati: "2024-08-03",
+    gol: "DP",
+    alamat: "DUSUN LUBUK BARU RT/RW 001/001 MEKAR JAYA KEC. KAMPAR KIRI TENGAH",
+    hp: "",
+    nik: "1401190508610001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1182-JS": { noPolisi:"BM-1182-JS", pemilik:"LUSIANA", tglMati:"2024-08-01", gol:"DP",
-    alamat:"JL.PEMUDA NO.32 B RT.002 RW.005 KEL.TAMPAN KEC.PYG.SEKAKI P.BARU", hp:"", nik:"1471115307720002", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-1182-JS": {
+    noPolisi: "BM-1182-JS",
+    pemilik: "LUSIANA",
+    tglMati: "2024-08-01",
+    gol: "DP",
+    alamat: "JL.PEMUDA NO.32 B RT.002 RW.005 KEL.TAMPAN KEC.PYG.SEKAKI P.BARU",
+    hp: "",
+    nik: "1471115307720002",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-8429-PF": { noPolisi:"BM-8429-PF", pemilik:"AGUSRI", tglMati:"2024-08-02", gol:"DP",
-    alamat:"JL. JENDRAL SUDIRMAN RT/RW. 001/004 TELUK NILAP KUBU BABUSSALAM R", hp:"", nik:"1407010208820001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-8429-PF": {
+    noPolisi: "BM-8429-PF",
+    pemilik: "AGUSRI",
+    tglMati: "2024-08-02",
+    gol: "DP",
+    alamat: "JL. JENDRAL SUDIRMAN RT/RW. 001/004 TELUK NILAP KUBU BABUSSALAM R",
+    hp: "",
+    nik: "1407010208820001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1024-TO": { noPolisi:"BM-1024-TO", pemilik:"RAHIMAH PURBA", tglMati:"2024-08-04", gol:"DP",
-    alamat:"JL.SIDODADI / ARENGKA ATAS RT.002/010 KEL.MAHARATU KEC.MPY.DAMAI", hp:"0", nik:"1471096203590001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-1024-TO": {
+    noPolisi: "BM-1024-TO",
+    pemilik: "RAHIMAH PURBA",
+    tglMati: "2024-08-04",
+    gol: "DP",
+    alamat: "JL.SIDODADI / ARENGKA ATAS RT.002/010 KEL.MAHARATU KEC.MPY.DAMAI",
+    hp: "0",
+    nik: "1471096203590001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1809-AD": { noPolisi:"BM-1809-AD", pemilik:"AFRIZAL ABBAS", tglMati:"2024-08-07", gol:"DP",
-    alamat:"JL. KETITIRAN NO.17 RT.01/07 KEL. KAMPUNG MELAYU KEC. SUKAJADI PE", hp:"0", nik:"1471011209580001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-1809-AD": {
+    noPolisi: "BM-1809-AD",
+    pemilik: "AFRIZAL ABBAS",
+    tglMati: "2024-08-07",
+    gol: "DP",
+    alamat: "JL. KETITIRAN NO.17 RT.01/07 KEL. KAMPUNG MELAYU KEC. SUKAJADI PE",
+    hp: "0",
+    nik: "1471011209580001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-8861-CJ": { noPolisi:"BM-8861-CJ", pemilik:"AGUSWEN AMRI", tglMati:"2024-08-01", gol:"DP",
-    alamat:"DUSUN SAMUNDAM SELATAN DESA LUBUK TERAP RT 005 RW 001 KEL. LUBUK", hp:"", nik:"1405122008820004", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-8861-CJ": {
+    noPolisi: "BM-8861-CJ",
+    pemilik: "AGUSWEN AMRI",
+    tglMati: "2024-08-01",
+    gol: "DP",
+    alamat: "DUSUN SAMUNDAM SELATAN DESA LUBUK TERAP RT 005 RW 001 KEL. LUBUK",
+    hp: "",
+    nik: "1405122008820004",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-9022-FA": { noPolisi:"BM-9022-FA", pemilik:"IBRAHIM", tglMati:"2024-08-07", gol:"DP",
-    alamat:"DUSUN KOTO MENANTI RT/RW. 001/001 KEL. SALO TIMUR, KEC. SALO KAB.", hp:"082383428830", nik:"1401131308550001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-9022-FA": {
+    noPolisi: "BM-9022-FA",
+    pemilik: "IBRAHIM",
+    tglMati: "2024-08-07",
+    gol: "DP",
+    alamat: "DUSUN KOTO MENANTI RT/RW. 001/001 KEL. SALO TIMUR, KEC. SALO KAB.",
+    hp: "082383428830",
+    nik: "1401131308550001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1804-JZ": { noPolisi:"BM-1804-JZ", pemilik:"IKHSAN NOFRIANSYAH", tglMati:"2024-08-07", gol:"DP",
-    alamat:"JL. CEMARA GG. CEMARA I NO.26 RT.02/05 KEL. SUKAMAJU KEC. SAIL PE", hp:"082189343253", nik:"1471030711920021", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-1804-JZ": {
+    noPolisi: "BM-1804-JZ",
+    pemilik: "IKHSAN NOFRIANSYAH",
+    tglMati: "2024-08-07",
+    gol: "DP",
+    alamat: "JL. CEMARA GG. CEMARA I NO.26 RT.02/05 KEL. SUKAMAJU KEC. SAIL PE",
+    hp: "082189343253",
+    nik: "1471030711920021",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1828-KD": { noPolisi:"BM-1828-KD", pemilik:"NURYATI", tglMati:"2024-08-09", gol:"DP",
-    alamat:"SUKA RAJA, RT/RW 07/02 KEL. SUKARAJA KEC. LOGAS TANAH DARAT KAB.", hp:"0", nik:"1409084305890001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"
+  "BM-1828-KD": {
+    noPolisi: "BM-1828-KD",
+    pemilik: "NURYATI",
+    tglMati: "2024-08-09",
+    gol: "DP",
+    alamat: "SUKA RAJA, RT/RW 07/02 KEL. SUKARAJA KEC. LOGAS TANAH DARAT KAB.",
+    hp: "0",
+    nik: "1409084305890001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1801-X": { noPolisi:"BM-1801-X", pemilik:"NURYATI", tglMati:"2024-08-09", gol:"DP",
-    alamat:"SUKA RAJA, RT/RW 07/02 KEL. SUKARAJA KEC. LOGAS TANAH DARAT KAB.", hp:"0", nik:"1409084305890001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1801-X": {
+    noPolisi: "BM-1801-X",
+    pemilik: "NURYATI",
+    tglMati: "2024-08-09",
+    gol: "DP",
+    alamat: "SUKA RAJA, RT/RW 07/02 KEL. SUKARAJA KEC. LOGAS TANAH DARAT KAB.",
+    hp: "0",
+    nik: "1409084305890001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1802-X": { noPolisi:"BM-1802-X", pemilik:"RETNO ACHIR SULISTIOWATI    EX.B", tglMati:"2024-08-03", gol:"DP",
-    alamat:"KPR.I JL.DUA NO.23 RT.02/04 KEC.TUALANG KAB.SIAK", hp:"0", nik:"1408040003830006", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1802-X": {
+    noPolisi: "BM-1802-X",
+    pemilik: "RETNO ACHIR SULISTIOWATI    EX.B",
+    tglMati: "2024-08-03",
+    gol: "DP",
+    alamat: "KPR.I JL.DUA NO.23 RT.02/04 KEC.TUALANG KAB.SIAK",
+    hp: "0",
+    nik: "1408040003830006",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1803-X": { noPolisi:"BM-1803-X", pemilik:"ARI OKTANIA", tglMati:"2024-08-02", gol:"DP",
-    alamat:"BUKIT LEMBAH SUBUR RT/RW 003/001 KERUMUTAN KAB. PELALAWAN RIAU", hp:"0", nik:"1405075510900001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi" 
-   },
-  "BM-1804-X": { noPolisi:"BM-1804-X", pemilik:"AZHAR", tglMati:"2024-08-04", gol:"DP",
-    alamat:"JL. PEMBINA IV KOMP GTI RT.03/10 KEL. LEMBAH SARI KEC. RUMBAI PES", hp:"0", nik:"1471121005660002", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1803-X": {
+    noPolisi: "BM-1803-X",
+    pemilik: "ARI OKTANIA",
+    tglMati: "2024-08-02",
+    gol: "DP",
+    alamat: "BUKIT LEMBAH SUBUR RT/RW 003/001 KERUMUTAN KAB. PELALAWAN RIAU",
+    hp: "0",
+    nik: "1405075510900001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1805-X": { noPolisi:"BM-1805-X", pemilik:"BASRIZAL", tglMati:"2024-08-11", gol:"DP",
-    alamat:"JL.SENI ALAM RT.0102 DS BALAI MAKAM KEC.MANDAU DURI", hp:"0", nik:"0", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1804-X": {
+    noPolisi: "BM-1804-X",
+    pemilik: "AZHAR",
+    tglMati: "2024-08-04",
+    gol: "DP",
+    alamat: "JL. PEMBINA IV KOMP GTI RT.03/10 KEL. LEMBAH SARI KEC. RUMBAI PES",
+    hp: "0",
+    nik: "1471121005660002",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1806-X": { noPolisi:"BM-1806-X", pemilik:"VERA LINA. D", tglMati:"2024-08-09", gol:"DP",
-    alamat:"JL. FAJAR UJUNG RT 03/11 KEL. LB. BARAT KEC. P. SEKAKI PEKANBARU", hp:"0", nik:"1471111003140607", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1805-X": {
+    noPolisi: "BM-1805-X",
+    pemilik: "BASRIZAL",
+    tglMati: "2024-08-11",
+    gol: "DP",
+    alamat: "JL.SENI ALAM RT.0102 DS BALAI MAKAM KEC.MANDAU DURI",
+    hp: "0",
+    nik: "0",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1807-X": { noPolisi:"BM-1807-X", pemilik:"SUSYANTI SITORUS", tglMati:"2024-08-02", gol:"DP",
-    alamat:"JL. JEND. SUDIRMAN RT. 001 RW. 001 BAGAN BATU BAGAN SINEMBAH KABU", hp:"0", nik:"1407054704760006", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1806-X": {
+    noPolisi: "BM-1806-X",
+    pemilik: "VERA LINA. D",
+    tglMati: "2024-08-09",
+    gol: "DP",
+    alamat: "JL. FAJAR UJUNG RT 03/11 KEL. LB. BARAT KEC. P. SEKAKI PEKANBARU",
+    hp: "0",
+    nik: "1471111003140607",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1808-X": { noPolisi:"BM-1808-X", pemilik:"RAMADANIATI", tglMati:"2024-08-12", gol:"DP",
-    alamat:"JL. SUKAKARYA GG GEMBIRA 71 RT 001 RW 003 KEL. TUAH KARYA KEC. TA", hp:"", nik:"1471085105860041", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1807-X": {
+    noPolisi: "BM-1807-X",
+    pemilik: "SUSYANTI SITORUS",
+    tglMati: "2024-08-02",
+    gol: "DP",
+    alamat: "JL. JEND. SUDIRMAN RT. 001 RW. 001 BAGAN BATU BAGAN SINEMBAH KABU",
+    hp: "0",
+    nik: "1407054704760006",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1809-X": { noPolisi:"BM-1809-X", pemilik:"BOB MALIANTON", tglMati:"2024-08-01", gol:"DP",
-    alamat:"SOREK SATU RT.03 RW.01 KEC.PANGKALAN KURAS KAB.PELALAWAN", hp:"", nik:"1405031202790006", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi" 
-   },
-  "BM-1810-X": { noPolisi:"BM-1810-X", pemilik:"M. YUSUF", tglMati:"2024-08-06", gol:"DP",
-    alamat:"JL. PEPAYA UJUNG RT. 001 RW. 002 KEL. PANGKALAN KERINCI KOTA KEC.", hp:"0", nik:"1405021008660005", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1808-X": {
+    noPolisi: "BM-1808-X",
+    pemilik: "RAMADANIATI",
+    tglMati: "2024-08-12",
+    gol: "DP",
+    alamat: "JL. SUKAKARYA GG GEMBIRA 71 RT 001 RW 003 KEL. TUAH KARYA KEC. TA",
+    hp: "",
+    nik: "1471085105860041",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1811-X": { noPolisi:"BM-1811-X", pemilik:"GANI BUDIMAN", tglMati:"2024-08-13", gol:"DP",
-    alamat:"MEKAR JAYA RT.020 RW.007 KEL.MEKAR JAYA KEC.PANGKALAN KERINCI KAB", hp:"", nik:"1405022602780007", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1809-X": {
+    noPolisi: "BM-1809-X",
+    pemilik: "BOB MALIANTON",
+    tglMati: "2024-08-01",
+    gol: "DP",
+    alamat: "SOREK SATU RT.03 RW.01 KEC.PANGKALAN KURAS KAB.PELALAWAN",
+    hp: "",
+    nik: "1405031202790006",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1812-X": { noPolisi:"BM-1812-X", pemilik:"SYAFRUDIN.M", tglMati:"2024-08-01", gol:"DP",
-    alamat:"JL.PURING BLOK AB 165 RT.14 DUMAI", hp:"0", nik:"0", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi" 
-   },
-  "BM-1813-X": { noPolisi:"BM-1813-X", pemilik:"NOFRIYANDA", tglMati:"2024-08-05", gol:"DP",
-    alamat:"JL.BAHARUDDIN RT.005 RW.005 KEL.PEMATANGKAPAU KEC.KULIM P.BARU", hp:"0", nik:"0", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1810-X": {
+    noPolisi: "BM-1810-X",
+    pemilik: "M. YUSUF",
+    tglMati: "2024-08-06",
+    gol: "DP",
+    alamat: "JL. PEPAYA UJUNG RT. 001 RW. 002 KEL. PANGKALAN KERINCI KOTA KEC.",
+    hp: "0",
+    nik: "1405021008660005",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1814-X": { noPolisi:"BM-1814-X", pemilik:"YOHANES SYARANA MUAL", tglMati:"2024-08-03", gol:"DP",
-    alamat:"JL.BINTARA NO.22 RT.03/06 PEKANBARU", hp:"0", nik:"0", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1811-X": {
+    noPolisi: "BM-1811-X",
+    pemilik: "GANI BUDIMAN",
+    tglMati: "2024-08-13",
+    gol: "DP",
+    alamat: "MEKAR JAYA RT.020 RW.007 KEL.MEKAR JAYA KEC.PANGKALAN KERINCI KAB",
+    hp: "",
+    nik: "1405022602780007",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1815-X": { noPolisi:"BM-1815-X", pemilik:"ELMI YN", tglMati:"2024-08-06", gol:"DP",
-    alamat:"JL.TAMAN SARI NO.23 RT.003 RW.007 KEL.TKR.SELATAN KEC.BKT.RAYA P.", hp:"0", nik:"1471075709560041", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi" 
+  "BM-1812-X": {
+    noPolisi: "BM-1812-X",
+    pemilik: "SYAFRUDIN.M",
+    tglMati: "2024-08-01",
+    gol: "DP",
+    alamat: "JL.PURING BLOK AB 165 RT.14 DUMAI",
+    hp: "0",
+    nik: "0",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1816-X": { noPolisi:"BM-1816-X", pemilik:"METRIANTO", tglMati:"2024-08-07", gol:"DP",
-    alamat:"JL.PAHLAWAN KERJA GG.SUHADA NO.13 RT.002 RW.002 KEL.MAHARATU KEC.", hp:"0", nik:"0", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1813-X": {
+    noPolisi: "BM-1813-X",
+    pemilik: "NOFRIYANDA",
+    tglMati: "2024-08-05",
+    gol: "DP",
+    alamat: "JL.BAHARUDDIN RT.005 RW.005 KEL.PEMATANGKAPAU KEC.KULIM P.BARU",
+    hp: "0",
+    nik: "0",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1817-X": { noPolisi:"BM-1817-X", pemilik:"ERIYANTO IDRIS", tglMati:"2024-08-09", gol:"DP",
-    alamat:"JL. KESUMA GG. NUSA INDAH RT.017/RW.000 KEL JAYA MUKTI KEC. DUMAI", hp:"08127632193", nik:"1472022303700001", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1814-X": {
+    noPolisi: "BM-1814-X",
+    pemilik: "YOHANES SYARANA MUAL",
+    tglMati: "2024-08-03",
+    gol: "DP",
+    alamat: "JL.BINTARA NO.22 RT.03/06 PEKANBARU",
+    hp: "0",
+    nik: "0",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1818-X": { noPolisi:"BM-1818-X", pemilik:"ROSNANI", tglMati:"2024-08-14", gol:"DP",
-    alamat:"JL. PROF. M. YAMIN RT/RW. 008/- RIMBA SEKAMPUNG, DUMAI KOTA DUMAI", hp:"0", nik:"1472016409820081", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1815-X": {
+    noPolisi: "BM-1815-X",
+    pemilik: "ELMI YN",
+    tglMati: "2024-08-06",
+    gol: "DP",
+    alamat: "JL.TAMAN SARI NO.23 RT.003 RW.007 KEL.TKR.SELATAN KEC.BKT.RAYA P.",
+    hp: "0",
+    nik: "1471075709560041",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1819-X": { noPolisi:"BM-1819-X", pemilik:"FRIANDES", tglMati:"2024-08-13", gol:"DP",
-    alamat:"JL.BANDES RT.0603 DURI BARAT MANDAU BENGKALIS", hp:"0", nik:"1403091205712210", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  
+  "BM-1816-X": {
+    noPolisi: "BM-1816-X",
+    pemilik: "METRIANTO",
+    tglMati: "2024-08-07",
+    gol: "DP",
+    alamat: "JL.PAHLAWAN KERJA GG.SUHADA NO.13 RT.002 RW.002 KEL.MAHARATU KEC.",
+    hp: "0",
+    nik: "0",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
   },
-  "BM-1820-X": { noPolisi:"BM-1820-X", pemilik:"ADINATA", tglMati:"2024-08-08", gol:"DP",
-    alamat:"JL CAMAR XI NO.308 PERUM GRIYA SIDOMULYO PERMAI RT/RW 001/012 MAH", hp:"", nik:"1471091310910022", prov:"RIAU", deskripsi:"Hitam - Kendaraan Pribadi"  }
-
+  "BM-1817-X": {
+    noPolisi: "BM-1817-X",
+    pemilik: "ERIYANTO IDRIS",
+    tglMati: "2024-08-09",
+    gol: "DP",
+    alamat: "JL. KESUMA GG. NUSA INDAH RT.017/RW.000 KEL JAYA MUKTI KEC. DUMAI",
+    hp: "08127632193",
+    nik: "1472022303700001",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
+  },
+  "BM-1818-X": {
+    noPolisi: "BM-1818-X",
+    pemilik: "ROSNANI",
+    tglMati: "2024-08-14",
+    gol: "DP",
+    alamat: "JL. PROF. M. YAMIN RT/RW. 008/- RIMBA SEKAMPUNG, DUMAI KOTA DUMAI",
+    hp: "0",
+    nik: "1472016409820081",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
+  },
+  "BM-1819-X": {
+    noPolisi: "BM-1819-X",
+    pemilik: "FRIANDES",
+    tglMati: "2024-08-13",
+    gol: "DP",
+    alamat: "JL.BANDES RT.0603 DURI BARAT MANDAU BENGKALIS",
+    hp: "0",
+    nik: "1403091205712210",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
+  },
+  "BM-1820-X": {
+    noPolisi: "BM-1820-X",
+    pemilik: "ADINATA",
+    tglMati: "2024-08-08",
+    gol: "DP",
+    alamat: "JL CAMAR XI NO.308 PERUM GRIYA SIDOMULYO PERMAI RT/RW 001/012 MAH",
+    hp: "",
+    nik: "1471091310910022",
+    prov: "RIAU",
+    deskripsi: "Hitam - Kendaraan Pribadi",
+  },
 };
 
 function normalizePlate(raw = "") {
@@ -243,14 +497,14 @@ function buildPlatSummary(plates = []) {
     }
     return [
       `${p}`,
-      `Nama Pemilik Terakhir : ${rec.pemilik || '-'}`,
-      `Tanggal Mati          : ${rec.tglMati || '-'}`,
-      `Kode Golongan         : ${rec.gol || '-'}`,
-      `Alamat Pemilik        : ${rec.alamat || '-'}`,
-      `Nomor HP              : ${rec.hp || '-'}`,
-      `NIK                   : ${rec.nik || '-'}`,
-      `Provinsi              : ${rec.prov || '-'}`,
-      `Deskripsi Plat        : ${rec.deskripsi || '-'}`,
+      `Nama Pemilik Terakhir : ${rec.pemilik || "-"}`,
+      `Tanggal Mati          : ${rec.tglMati || "-"}`,
+      `Kode Golongan         : ${rec.gol || "-"}`,
+      `Alamat Pemilik        : ${rec.alamat || "-"}`,
+      `Nomor HP              : ${rec.hp || "-"}`,
+      `NIK                   : ${rec.nik || "-"}`,
+      `Provinsi              : ${rec.prov || "-"}`,
+      `Deskripsi Plat        : ${rec.deskripsi || "-"}`,
     ].join("\n");
   });
   return blocks.join("\n\n");
@@ -259,8 +513,13 @@ function buildPlatSummary(plates = []) {
 /* =========================================================
   HALAMAN: HASIL SURVEI
   ========================================================= */
-export default function HasilSurvey({ data = {}, setData, next, back, playBeep }) {
-
+export default function HasilSurvey({
+  data = {},
+  setData,
+  next,
+  back,
+  playBeep,
+}) {
   const set = (k) => (e) => setData?.({ ...data, [k]: e.target.value });
 
   const ttdMode = data.ttdModeSurvey || "image";
@@ -269,18 +528,24 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
   const [sumbers, setSumbers] = useState(
     data.sumbers || [{ id: Date.now(), identitas: "", ttd: "" }]
   );
-  const addRow = () => setSumbers((r) => [...r, { id: Date.now(), identitas: "", ttd: "" }]);
+  const addRow = () =>
+    setSumbers((r) => [...r, { id: Date.now(), identitas: "", ttd: "" }]);
   const delRow = (id) => setSumbers((r) => r.filter((x) => x.id !== id));
   const setRow = (id, key, val) =>
     setSumbers((r) => r.map((x) => (x.id === id ? { ...x, [key]: val } : x)));
 
   // lampiran
   const att = data.attachSurvey || {};
-  const setAtt = (obj) => setData?.({ ...data, attachSurvey: { ...(data.attachSurvey || {}), ...obj } });
+  const setAtt = (obj) =>
+    setData?.({
+      ...data,
+      attachSurvey: { ...(data.attachSurvey || {}), ...obj },
+    });
   const pushFotos = async (files) => {
     const list = Array.from(files || []);
     const arr = (att.fotoSurvey || []).slice();
-    for (const f of list) arr.push({ name: f.name, file: f, url: await fileToDataURL(f) });
+    for (const f of list)
+      arr.push({ name: f.name, file: f, url: await fileToDataURL(f) });
     setAtt({ fotoSurvey: arr });
   };
 
@@ -289,19 +554,28 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       { key: "ktp", label: "KTP Korban" },
       { key: "kk", label: "Kartu Keluarga (KK)" },
       { key: "bukuTabungan", label: "Buku Tabungan Korban" },
-      { key: "formPengajuan", label: "Formulir Pengajuan Santunan Jasaraharja" },
+      {
+        key: "formPengajuan",
+        label: "Formulir Pengajuan Santunan Jasaraharja",
+      },
       { key: "formKeteranganAW", label: "Formulir Keterangan Ahli Waris" },
       { key: "skKematian", label: "Surat Keterangan Kematian" },
-      { key: "aktaKelahiran", label: "Akta Kelahiran" },
     ];
-    filesNeeded.forEach(f => {
-      console.log(`Cek dokumen ${f.label}:`, att[f.key] ? "✔ Terunggah" : "⛔ Belum diunggah");
+    filesNeeded.forEach((f) => {
+      console.log(
+        `Cek dokumen ${f.label}:`,
+        att[f.key] ? "✔ Terunggah" : "⛔ Belum diunggah"
+      );
     });
-    console.log("Cek fotoSurveyList:", (att.fotoSurvey || []).length ? "✔ Terunggah" : "⛔ Belum diunggah");
+    console.log(
+      "Cek fotoSurveyList:",
+      (att.fotoSurvey || []).length ? "✔ Terunggah" : "⛔ Belum diunggah"
+    );
   }, [att]);
 
   const sifatCidera = data.sifatCidera || ""; // "MD" | "LL"
   const jenisSurvei = data.jenisSurvei || "";
+  const isLampiranMD = jenisSurvei === "keabsahan_waris";
 
   const v = {
     noPL: data.noPL || "",
@@ -315,17 +589,22 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     tempatKecelakaan: data.tempatKecelakaan || data.lokasiKecelakaan || "",
     tanggalKecelakaan: data.tanggalKecelakaan || "",
     hubunganSesuai: data.hubunganSesuai ?? "",
+    sifatCidera: data.sifatCidera || "",
     uraian: data.uraianSurvei || data.uraian || "",
     kesimpulan: data.kesimpulanSurvei || "",
     pejabatMengetahuiName: data.pejabatMengetahuiName || "Andi Raharja, S.A.B",
-    pejabatMengetahuiJabatan: data.pejabatMengetahuiJabatan || "Kepala Bagian Operasional",
+    pejabatMengetahuiJabatan:
+      data.pejabatMengetahuiJabatan || "Kepala Bagian Operasional",
     pejabatMengetahuiTtd: data.pejabatMengetahuiTtd || "",
   };
 
   const [platRows, setPlatRows] = useState({});
   const [loadingPlat, setLoadingPlat] = useState(false);
 
-  const detectedPlates = useMemo(() => extractPlates(v.uraian || ""), [v.uraian]);
+  const detectedPlates = useMemo(
+    () => extractPlates(v.uraian || ""),
+    [v.uraian]
+  );
 
   useEffect(() => {
     const fetchPlat = async () => {
@@ -337,7 +616,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       setLoadingPlat(true);
       const { data: rows, error } = await supabase
         .from("data_sw")
-        .select("no_polisi,nama_pemilik_terakhir,tgl_mati_yad,kode_golongan,alamat_pemilik_terakhir,nomor_hp,nik,prov_nama,deskripsi_plat")
+        .select(
+          "no_polisi,nama_pemilik_terakhir,tgl_mati_yad,kode_golongan,alamat_pemilik_terakhir,nomor_hp,nik,prov_nama,deskripsi_plat"
+        )
         .in("no_polisi", plates);
 
       if (error) {
@@ -345,7 +626,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         setPlatRows({});
       } else {
         const map = {};
-        (rows || []).forEach(r => { map[(r.no_polisi || "").toUpperCase()] = r; });
+        (rows || []).forEach((r) => {
+          map[(r.no_polisi || "").toUpperCase()] = r;
+        });
         setPlatRows(map);
       }
       setLoadingPlat(false);
@@ -357,7 +640,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     const plates = (detectedPlates || []).map(normalizePlate).filter(Boolean);
     if (!plates.length) return "—";
 
-    const lines = plates.map(p => {
+    const lines = plates.map((p) => {
       const rec = platRows[p]; // hasil dari Supabase .in('no_polisi', ...)
       if (!rec) {
         // OPTIONAL fallback ke VEHICLE_DB kalau masih mau dipakai:
@@ -395,7 +678,6 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     return lines.join("\n\n");
   }, [detectedPlates, platRows]);
 
-
   // validasi
   const canNext = useMemo(() => {
     const base =
@@ -424,14 +706,20 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
     const f = e.target.files?.[0];
     if (!f) return;
     const dataURL = await fileToDataURL(f);
-    setData?.({ ...data, pejabatMengetahuiTtd: dataURL, ttdModeSurvey: "image" });
+    setData?.({
+      ...data,
+      pejabatMengetahuiTtd: dataURL,
+      ttdModeSurvey: "image",
+    });
   };
 
   /* =================== CETAK & DOWNLOAD =================== */
   const buildHTML = async (mode = "print") => {
     let ttdData = null;
     if (ttdMode === "image") {
-      ttdData = v.pejabatMengetahuiTtd || (await toDataURL(DEFAULT_TTD).catch(() => null));
+      ttdData =
+        v.pejabatMengetahuiTtd ||
+        (await toDataURL(DEFAULT_TTD).catch(() => null));
     }
     const petugasTtdSrc = att.petugasTtd?.url || null;
     const forPrint = {
@@ -459,7 +747,11 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
   const handleDownloadDoc = async () => {
     try {
       const html = await buildHTML("doc");
-      downloadAs("Laporan_Hasil_Survei_AW.doc", "application/msword;charset=utf-8", html);
+      downloadAs(
+        "Laporan_Hasil_Survei_AW.doc",
+        "application/msword;charset=utf-8",
+        html
+      );
     } catch (e) {
       console.error(e);
       alert("Gagal menyiapkan dokumen: " + e.message);
@@ -467,37 +759,38 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
   };
 
   const handleNext = () => {
-    if (!canNext) return alert("Lengkapi isian & lampiran wajib terlebih dahulu.");
-    
+    if (!canNext)
+      return alert("Lengkapi isian & lampiran wajib terlebih dahulu.");
+
     console.log("🔍 DATA SUMBER INFORMASI sebelum save:");
     console.log("   - Jumlah sumbers:", sumbers.length);
-    
+
     sumbers.forEach((sumber, index) => {
       console.log(`   - Sumber ${index + 1}:`, {
         identitas: sumber.identitas,
         hasFoto: !!sumber.foto,
         fotoIsArray: Array.isArray(sumber.foto),
         fotoLength: sumber.foto?.length || 0,
-        fotoStructure: sumber.foto?.map(f => ({
+        fotoStructure: sumber.foto?.map((f) => ({
           hasFile: !!f.file,
           hasDataURL: !!f.dataURL,
-          name: f.name
-        }))
+          name: f.name,
+        })),
       });
     });
 
-     const nextData = { 
-        ...data, 
-        sumbers,
-        attachSurvey: att
-      };
+    const nextData = {
+      ...data,
+      sumbers,
+      attachSurvey: att,
+    };
 
     // ✅ DEBUG: Cek data sebelum save
     console.log("🔍 DATA sebelum saveSurveyToSupabase:");
     console.log("   - attachSurvey:", data.attachSurvey);
     console.log("   - attachSurvey.fotoSurvey:", data.attachSurvey?.fotoSurvey);
     console.log("   - fotoSurveyList:", data.fotoSurveyList);
-    
+
     setData?.({ ...data, sumbers });
     playBeep?.();
     next?.();
@@ -510,11 +803,12 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
           <h2 className="title">Laporan Hasil Survei</h2>
           <div className="chips">
             <span className="chip">Langkah 3/5</span>
-            <span className="chip alt">Sifat Cidera: {sifatCidera || "—"}</span>
             <span className="chip alt">
               Jenis Survei:{" "}
               {JENIS_SURVEI.find((j) => j.value === jenisSurvei)?.label ||
-                (data.jenisSurveiLainnya ? `Lainnya: ${data.jenisSurveiLainnya}` : "—")}
+                (data.jenisSurveiLainnya
+                  ? `Lainnya: ${data.jenisSurveiLainnya}`
+                  : "—")}
             </span>
           </div>
         </div>
@@ -529,27 +823,53 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         <div className="row">
           <div>
             <label className="label">No. PL</label>
-            <input className="input" value={v.noPL} onChange={set("noPL")} placeholder="PL/...." />
+            <input
+              className="input"
+              value={v.noPL}
+              onChange={set("noPL")}
+              placeholder="PL/...."
+            />
           </div>
           <div>
             <label className="label">Hari/Tanggal Survei</label>
-            <input type="date" className="input" value={v.hariTanggal} onChange={set("hariTanggal")} />
+            <input
+              type="date"
+              className="input"
+              value={v.hariTanggal}
+              onChange={set("hariTanggal")}
+            />
           </div>
         </div>
 
         <div className="row">
           <div>
-            <label className="label">Petugas Survei <small className="hint">• Dikte</small></label>
+            <label className="label">
+              Petugas Survei <small className="hint">• Dikte</small>
+            </label>
             <div className="with-mic">
-              <input className="input" value={v.petugasSurvei} onChange={set("petugasSurvei")} />
-              <Mic onText={(t) => setData?.({ ...data, petugasSurvei: `${v.petugasSurvei} ${t}`.trim() })} />
+              <input
+                className="input"
+                value={v.petugasSurvei}
+                onChange={set("petugasSurvei")}
+              />
+              <Mic
+                onText={(t) =>
+                  setData?.({
+                    ...data,
+                    petugasSurvei: `${v.petugasSurvei} ${t}`.trim(),
+                  })
+                }
+              />
             </div>
           </div>
           <div>
             <label className="label">Jenis Survei</label>
             <div className="seg">
               {JENIS_SURVEI.map((j) => (
-                <label key={j.value} className={`pill ${jenisSurvei === j.value ? "active" : ""}`}>
+                <label
+                  key={j.value}
+                  className={`pill ${jenisSurvei === j.value ? "active" : ""}`}
+                >
                   <input
                     type="radio"
                     name="jenis"
@@ -558,7 +878,10 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                       setData?.({
                         ...data,
                         jenisSurvei: j.value,
-                        jenisSurveiLainnya: j.value === "lainnya" ? data.jenisSurveiLainnya || "" : "",
+                        jenisSurveiLainnya:
+                          j.value === "lainnya"
+                            ? data.jenisSurveiLainnya || ""
+                            : "",
                       })
                     }
                   />
@@ -582,16 +905,33 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       <section className="card">
         <div className="row-auto-2">
           <div>
-            <label className="label">Nama Korban <small className="hint">• Dikte</small></label>
+            <label className="label">
+              Nama Korban <small className="hint">• Dikte</small>
+            </label>
             <div className="with-mic">
-              <input className="input" value={v.namaKorban} onChange={set("namaKorban")} />
-              <Mic onText={(t) => setData?.({ ...data, namaKorban: `${v.namaKorban} ${t}`.trim() })} />
+              <input
+                className="input"
+                value={v.namaKorban}
+                onChange={set("namaKorban")}
+              />
+              <Mic
+                onText={(t) =>
+                  setData?.({
+                    ...data,
+                    namaKorban: `${v.namaKorban} ${t}`.trim(),
+                  })
+                }
+              />
             </div>
           </div>
 
           <div>
             <label className="label">No. Berkas</label>
-            <input className="input" value={v.noBerkas} onChange={set("noBerkas")} />
+            <input
+              className="input"
+              value={v.noBerkas}
+              onChange={set("noBerkas")}
+            />
           </div>
         </div>
 
@@ -599,14 +939,28 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
           <div>
             <label className="label">
               Alamat Korban <small className="hint">• Dikte</small>
-              <span className="info-icon cursor-pointer text-blue-500"
-                title={`Mohon tuliskan alamat sejelas mungkin, meliputi:\n\n- Nama jalan\n- Kelurahan & Kecamatan\n- Titik koordinat`}>
+              <span
+                className="info-icon cursor-pointer text-blue-500"
+                title={`Mohon tuliskan alamat sejelas mungkin, meliputi:\n\n- Nama jalan\n- Kelurahan & Kecamatan\n- Titik koordinat`}
+              >
                 ℹ️
               </span>
             </label>
             <div className="with-mic">
-              <textarea className="textarea" rows={3} value={v.alamatKorban} onChange={set("alamatKorban")} />
-              <Mic onText={(t) => setData?.({ ...data, alamatKorban: `${v.alamatKorban} ${t}`.trim() })} />
+              <textarea
+                className="textarea"
+                rows={3}
+                value={v.alamatKorban}
+                onChange={set("alamatKorban")}
+              />
+              <Mic
+                onText={(t) =>
+                  setData?.({
+                    ...data,
+                    alamatKorban: `${v.alamatKorban} ${t}`.trim(),
+                  })
+                }
+              />
             </div>
           </div>
         </div>
@@ -615,28 +969,58 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
           <div>
             <label className="label">
               Tempat Kecelakaan <small className="hint">• Dikte</small>
-              <span className="info-icon cursor-pointer text-blue-500"
-                title={`Mohon tuliskan alamat sejelas mungkin, meliputi:\n\n- Nama jalan\n- Dekat toko/gedung terkenal\n- Kelurahan & Kecamatan\n- Titik koordinat`}>
+              <span
+                className="info-icon cursor-pointer text-blue-500"
+                title={`Mohon tuliskan alamat sejelas mungkin, meliputi:\n\n- Nama jalan\n- Dekat toko/gedung terkenal\n- Kelurahan & Kecamatan\n- Titik koordinat`}
+              >
                 ℹ️
               </span>
             </label>
             <div className="with-mic">
-              <textarea className="textarea" rows={3} value={v.tempatKecelakaan} onChange={set("tempatKecelakaan")} />
-              <Mic onText={(t) => setData?.({ ...data, tempatKecelakaan: `${v.tempatKecelakaan} ${t}`.trim() })} />
+              <textarea
+                className="textarea"
+                rows={3}
+                value={v.tempatKecelakaan}
+                onChange={set("tempatKecelakaan")}
+              />
+              <Mic
+                onText={(t) =>
+                  setData?.({
+                    ...data,
+                    tempatKecelakaan: `${v.tempatKecelakaan} ${t}`.trim(),
+                  })
+                }
+              />
             </div>
           </div>
 
           <div>
             <label className="label">Tanggal Kecelakaan</label>
-            <input type="date" className="input" value={data.tanggalKecelakaan} onChange={set("tanggalKecelakaan")} />
+            <input
+              type="date"
+              className="input"
+              value={data.tanggalKecelakaan}
+              onChange={set("tanggalKecelakaan")}
+            />
           </div>
 
           <div>
             <label className="label">Kesesuaian Hubungan AW</label>
             <select
               className="select"
-              value={v.hubunganSesuai === "" ? "" : v.hubunganSesuai ? "sesuai" : "tidak"}
-              onChange={(e) => setData?.({ ...data, hubunganSesuai: e.target.value === "sesuai" })}
+              value={
+                v.hubunganSesuai === ""
+                  ? ""
+                  : v.hubunganSesuai
+                  ? "sesuai"
+                  : "tidak"
+              }
+              onChange={(e) =>
+                setData?.({
+                  ...data,
+                  hubunganSesuai: e.target.value === "sesuai",
+                })
+              }
             >
               <option value="">— Pilih —</option>
               <option value="sesuai">Sesuai</option>
@@ -651,7 +1035,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         <div className="label">Sumber Informasi</div>
         <div className="table-like">
           <div className="th">No</div>
-          <div className="th">Identitas/Detil Sumber Informasi & Metode Perolehan</div>
+          <div className="th">
+            Identitas/Detil Sumber Informasi & Metode Perolehan
+          </div>
           <div className="th">Foto (TTD (PNG) / Saksi Mata)</div>
 
           {sumbers.map((r, idx) => (
@@ -683,18 +1069,18 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                           reader.onerror = () => resolve("");
                           reader.readAsDataURL(f);
                         });
-                        
+
                         // ✅ FORMAT YANG DIHARAPKAN oleh saveSurveyToSupabase
                         return {
-                          file: f,                    // File object
-                          dataURL: dataURL,           // Data URL untuk preview
-                          name: f.name,               // Nama file
-                          size: f.size,               // Ukuran file
-                          type: f.type                // Tipe file
+                          file: f, // File object
+                          dataURL: dataURL, // Data URL untuk preview
+                          name: f.name, // Nama file
+                          size: f.size, // Ukuran file
+                          type: f.type, // Tipe file
                         };
                       })
                     );
-                    
+
                     // Simpan dengan format yang benar
                     setRow(r.id, "foto", fotoObjects.filter(Boolean));
                   }}
@@ -702,20 +1088,36 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
 
                 {/* Preview foto */}
                 {r.foto && Array.isArray(r.foto) && r.foto.length > 0 && (
-                  <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "6px",
+                    }}
+                  >
                     {r.foto.map((fotoObj, i) => (
                       <img
                         key={i}
                         src={fotoObj.dataURL || fotoObj} // Support both old and new format
                         alt={`foto-${i}`}
-                        style={{ width: "80px", height: "auto", borderRadius: 6, border: "1px solid #ccc" }}
+                        style={{
+                          width: "80px",
+                          height: "auto",
+                          borderRadius: 6,
+                          border: "1px solid #ccc",
+                        }}
                       />
                     ))}
                   </div>
                 )}
 
                 {sumbers.length > 1 && (
-                  <button className="btn small" onClick={() => delRow(r.id)} style={{ marginTop: 6 }}>
+                  <button
+                    className="btn small"
+                    onClick={() => delRow(r.id)}
+                    style={{ marginTop: 6 }}
+                  >
                     Hapus
                   </button>
                 )}
@@ -725,14 +1127,17 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
         </div>
 
         <div className="actions" style={{ justifyContent: "flex-start" }}>
-          <button className="btn ghost" onClick={addRow}>+ Tambah Baris</button>
+          <button className="btn ghost" onClick={addRow}>
+            + Tambah Baris
+          </button>
         </div>
       </section>
 
       {/* URAIAN & KESIMPULAN */}
       <section className="card">
         <label className="label">
-          Uraian & Kesimpulan Hasil Survei <small className="hint">• Dikte</small>
+          Uraian & Kesimpulan Hasil Survei{" "}
+          <small className="hint">• Dikte</small>
           <span
             className="info-icon cursor-pointer text-blue-500"
             title={`Tuliskan hasil survei secara ringkas dan jelas, meliputi:\n\n• Nomor polisi / plat kendaraan yang terlibat\n• Nama lokasi kejadian (jalan, kelurahan, kecamatan)\n• Nama pengendara dan korban\n• Jenis kendaraan yang terlibat\n• Kronologi singkat kejadian\n• Hasil pemeriksaan atau keterangan RS (bila ada)\n• Kesimpulan akhir apakah korban terjamin atau tidak`}
@@ -741,19 +1146,50 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
           </span>
         </label>
 
-        <div className="with-mic">
+        <div className="with-mic input-box">
           <textarea
             className="textarea"
             rows={6}
             value={v.uraian}
             onChange={(e) =>
-              setData(prev => ({
+              setData((prev) => ({
                 ...prev,
                 uraian: e.target.value,
                 uraianSurvei: e.target.value,
               }))
             }
           />
+
+          <div className="cidera-inline">
+            <label
+              className={`check ${v.sifatCidera === "LL" ? "active" : ""}`}
+            >
+              <input
+                type="radio"
+                name="sifatCidera"
+                checked={v.sifatCidera === "LL"}
+                onChange={() =>
+                  setData((prev) => ({ ...prev, sifatCidera: "LL" }))
+                }
+              />
+              Luka-luka
+            </label>
+
+            <label
+              className={`check ${v.sifatCidera === "MD" ? "active" : ""}`}
+            >
+              <input
+                type="radio"
+                name="sifatCidera"
+                checked={v.sifatCidera === "MD"}
+                onChange={() =>
+                  setData((prev) => ({ ...prev, sifatCidera: "MD" }))
+                }
+              />
+              Meninggal Dunia
+            </label>
+          </div>
+
           <Mic
             onText={(t) =>
               setData((prev) => ({
@@ -794,7 +1230,7 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
       {/* LAMPIRAN */}
       <section className="card">
         <div className="label">Lampiran</div>
-        {sifatCidera === "MD" && (
+        {isLampiranMD && (
           <div className="grid-attach">
             {/* KTP */}
             <div className="attach">
@@ -810,7 +1246,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, ktp: null })}
                     aria-label="Hapus KTP"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -829,7 +1267,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, bukuTabungan: null })}
                     aria-label="Hapus Buku Tabungan"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -843,12 +1283,17 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
               />
               {att.formPengajuan?.url && (
                 <div className="preview">
-                  <img src={att.formPengajuan.url} alt="Formulir Pengajuan Santunan" />
+                  <img
+                    src={att.formPengajuan.url}
+                    alt="Formulir Pengajuan Santunan"
+                  />
                   <button
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, formPengajuan: null })}
                     aria-label="Hapus Formulir Pengajuan Santunan"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -862,12 +1307,17 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
               />
               {att.formKeteranganAW?.url && (
                 <div className="preview">
-                  <img src={att.formKeteranganAW.url} alt="Formulir Keterangan Ahli Waris" />
+                  <img
+                    src={att.formKeteranganAW.url}
+                    alt="Formulir Keterangan Ahli Waris"
+                  />
                   <button
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, formKeteranganAW: null })}
                     aria-label="Hapus Formulir Keterangan Ahli Waris"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -881,12 +1331,17 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
               />
               {att.skKematian?.url && (
                 <div className="preview">
-                  <img src={att.skKematian.url} alt="Surat Keterangan Kematian" />
+                  <img
+                    src={att.skKematian.url}
+                    alt="Surat Keterangan Kematian"
+                  />
                   <button
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, skKematian: null })}
                     aria-label="Hapus Surat Keterangan Kematian"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -905,7 +1360,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, kk: null })}
                     aria-label="Hapus Kartu Keluarga"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -924,7 +1381,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                     className="btn-delete-thumb"
                     onClick={() => setAtt({ ...att, aktaKelahiran: null })}
                     aria-label="Hapus Akta Kelahiran"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               )}
             </div>
@@ -933,7 +1392,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
 
         {/* FOTO SURVEY */}
         <div style={{ marginTop: 10 }}>
-          <label className="label">Foto Survey (boleh banyak, tanpa batas)</label>
+          <label className="label">
+            Foto Survey (boleh banyak, tanpa batas)
+          </label>
           <input
             type="file"
             accept="image/*"
@@ -950,11 +1411,15 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                     onClick={() =>
                       setAtt({
                         ...att,
-                        fotoSurvey: att.fotoSurvey.filter((_, idx) => idx !== i),
+                        fotoSurvey: att.fotoSurvey.filter(
+                          (_, idx) => idx !== i
+                        ),
                       })
                     }
                     aria-label="Hapus foto"
-                  >✕</button>
+                  >
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
@@ -981,7 +1446,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                 <button
                   className="btn-delete-thumb"
                   onClick={() => setAtt({ ...att, mapSS: null })}
-                >✕</button>
+                >
+                  ✕
+                </button>
               </div>
             </div>
           )}
@@ -1007,7 +1474,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
                 <button
                   className="btn-delete-thumb"
                   onClick={() => setAtt({ ...att, barcode: null })}
-                >✕</button>
+                >
+                  ✕
+                </button>
               </div>
             </div>
           )}
@@ -1015,7 +1484,9 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
 
         {/* TTD Petugas */}
         <div style={{ marginTop: 10 }}>
-          <label className="label">TTD Petugas (PNG, latar transparan disarankan)</label>
+          <label className="label">
+            TTD Petugas (PNG, latar transparan disarankan)
+          </label>
           <input
             type="file"
             accept="image/png"
@@ -1032,12 +1503,15 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
           />
           {att.petugasTtd?.url && (
             <div className="thumbs">
-              <div className="preview preview--wide">{/* lebih lebar utk tanda tangan */}
+              <div className="preview preview--wide">
+                {/* lebih lebar utk tanda tangan */}
                 <img src={att.petugasTtd.url} alt="TTD Petugas" />
                 <button
                   className="btn-delete-thumb"
                   onClick={() => setAtt({ ...att, petugasTtd: null })}
-                >✕</button>
+                >
+                  ✕
+                </button>
               </div>
             </div>
           )}
@@ -1046,8 +1520,12 @@ export default function HasilSurvey({ data = {}, setData, next, back, playBeep }
 
       {/* AKSI */}
       <div className="actions">
-        <button className="btn ghost" onClick={back}>Kembali</button>
-        <button className="btn rose" onClick={handleNext} disabled={!canNext}>Selanjutnya</button>
+        <button className="btn ghost" onClick={back}>
+          Kembali
+        </button>
+        <button className="btn rose" onClick={handleNext} disabled={!canNext}>
+          Selanjutnya
+        </button>
       </div>
 
       <style>{css}</style>
@@ -1062,7 +1540,10 @@ function FilePick({ label, onPick, file }) {
   return (
     <div className="filepick">
       <div className="label">{label}</div>
-      <input type="file" onChange={(e) => onPick(e.target.files?.[0] || null)} />
+      <input
+        type="file"
+        onChange={(e) => onPick(e.target.files?.[0] || null)}
+      />
       {file && <div className="helper">• {file.name}</div>}
     </div>
   );
@@ -1072,13 +1553,17 @@ function FilePick({ label, onPick, file }) {
   BUILDER HTML CETAK & WORD (INFO PLAT DI BAWAH)
   ========================================================= */
 function makePrintHTML(v) {
-  const tableRows = (v.sumbers || []).map((r, i) => `
+  const tableRows = (v.sumbers || [])
+    .map(
+      (r, i) => `
     <tr>
       <td style="text-align:center">${i + 1}</td>
       <td>${escapeHtml(r.identitas || "")}</td>
       <td>${escapeHtml(r.ttd || "")}</td>
     </tr>
-  `).join("");
+  `
+    )
+    .join("");
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/>
   <style>
@@ -1104,15 +1589,35 @@ function makePrintHTML(v) {
 
   <div class="kv">
     <div>No. PL</div><div>:</div><div>${escapeHtml(v.noPL || "-")}</div>
-    <div>Hari/Tanggal Survei</div><div>:</div><div>${escapeHtml(fmtDate(v.hariTanggal))}</div>
-    <div>Petugas Survei</div><div>:</div><div>${escapeHtml(v.petugasSurvei || "-")}</div>
-    <div>Jenis Survei</div><div>:</div><div>${escapeHtml(v.jenisSurvei || "")} ${escapeHtml(v.jenisSurvei === "lainnya" ? (v.jenisSurveiLainnya || "") : "")}</div>
+    <div>Hari/Tanggal Survei</div><div>:</div><div>${escapeHtml(
+      fmtDate(v.hariTanggal)
+    )}</div>
+    <div>Petugas Survei</div><div>:</div><div>${escapeHtml(
+      v.petugasSurvei || "-"
+    )}</div>
+    <div>Jenis Survei</div><div>:</div><div>${escapeHtml(
+      v.jenisSurvei || ""
+    )} ${escapeHtml(
+    v.jenisSurvei === "lainnya" ? v.jenisSurveiLainnya || "" : ""
+  )}</div>
 
-    <div>Nama Korban</div><div>:</div><div>${escapeHtml(v.namaKorban || "-")}</div>
+    <div>Nama Korban</div><div>:</div><div>${escapeHtml(
+      v.namaKorban || "-"
+    )}</div>
     <div>No. Berkas</div><div>:</div><div>${escapeHtml(v.noBerkas || "-")}</div>
-    <div>Alamat Korban</div><div>:</div><div>${escapeHtml(v.alamatKorban || "-")}</div>
-    <div>Tempat/Tgl. Kecelakaan</div><div>:</div><div>${escapeHtml(v.tempatKecelakaan || "-")} / ${escapeHtml(fmtDate(v.tanggalKecelakaan))}</div>
-    <div>Kesesuaian Hubungan AW</div><div>:</div><div>${v.hubunganSesuai === "" ? "-" : (v.hubunganSesuai ? "Sesuai" : "Tidak Sesuai")}</div>
+    <div>Alamat Korban</div><div>:</div><div>${escapeHtml(
+      v.alamatKorban || "-"
+    )}</div>
+    <div>Tempat/Tgl. Kecelakaan</div><div>:</div><div>${escapeHtml(
+      v.tempatKecelakaan || "-"
+    )} / ${escapeHtml(fmtDate(v.tanggalKecelakaan))}</div>
+    <div>Kesesuaian Hubungan AW</div><div>:</div><div>${
+      v.hubunganSesuai === ""
+        ? "-"
+        : v.hubunganSesuai
+        ? "Sesuai"
+        : "Tidak Sesuai"
+    }</div>
   </div>
 
   <div style="font-weight:bold;margin:0 0 2mm">Sumber Informasi :</div>
@@ -1122,7 +1627,10 @@ function makePrintHTML(v) {
       <th>Identitas/Detil Sumber Informasi dan Metode Perolehan</th>
       <th style="width:35mm">Tanda Tangan</th>
     </tr></thead>
-    <tbody>${tableRows || '<tr><td style="text-align:center">1</td><td></td><td></td></tr>'}</tbody>
+    <tbody>${
+      tableRows ||
+      '<tr><td style="text-align:center">1</td><td></td><td></td></tr>'
+    }</tbody>
   </table>
 
   <div class="plat-section">
@@ -1149,9 +1657,15 @@ function makePrintHTML(v) {
     <div>
       <div class="lbl">Petugas Survei,</div>
       <div class="space">
-        ${v.petugasTtdSrc ? `<img class="sign-img" src="${v.petugasTtdSrc}" />` : ""}
+        ${
+          v.petugasTtdSrc
+            ? `<img class="sign-img" src="${v.petugasTtdSrc}" />`
+            : ""
+        }
       </div>
-      <div class="name">${escapeHtml(v.petugasSurvei || "........................................")}</div>
+      <div class="name">${escapeHtml(
+        v.petugasSurvei || "........................................"
+      )}</div>
     </div>
   </div>
   </body></html>`;
@@ -1172,25 +1686,48 @@ function makeDocHTML(v) {
     kvRow("Petugas Survei", esc(v.petugasSurvei || "-")),
     kvRow(
       "Jenis Survei",
-      esc(v.jenisSurvei === "lainnya"
-        ? `Lainnya: ${v.jenisSurveiLainnya || ""}`
-        : (v.jenisSurvei || "-"))
+      esc(
+        v.jenisSurvei === "lainnya"
+          ? `Lainnya: ${v.jenisSurveiLainnya || ""}`
+          : v.jenisSurvei || "-"
+      )
     ),
     kvRow("Nama Korban", esc(v.namaKorban || "-")),
     kvRow("No. Berkas", esc(v.noBerkas || "-")),
     kvRow("Alamat Korban", esc(v.alamatKorban || "-")),
-    kvRow("Tempat/Tgl. Kecelakaan", `${esc(v.tempatKecelakaan || "-")} / ${esc(fmtDate(v.tanggalKecelakaan))}`),
-    kvRow("Kesesuaian Hubungan AW", v.hubunganSesuai === "" ? "-" : (v.hubunganSesuai ? "Sesuai" : "Tidak Sesuai")),
+    kvRow(
+      "Tempat/Tgl. Kecelakaan",
+      `${esc(v.tempatKecelakaan || "-")} / ${esc(fmtDate(v.tanggalKecelakaan))}`
+    ),
+    kvRow(
+      "Kesesuaian Hubungan AW",
+      v.hubunganSesuai === ""
+        ? "-"
+        : v.hubunganSesuai
+        ? "Sesuai"
+        : "Tidak Sesuai"
+    ),
   ].join("");
 
-  const sumberRows = (v.sumbers?.length ? v.sumbers : [{identitas:"",ttd:""}])
-    .map((r, i) => `
+  const sumberRows = (
+    v.sumbers?.length ? v.sumbers : [{ identitas: "", ttd: "" }]
+  )
+    .map(
+      (r, i) => `
       <tr>
-        <td style="border:0.6pt solid #000;padding:4pt;text-align:center;width:22pt">${i + 1}</td>
-        <td style="border:0.6pt solid #000;padding:4pt">${esc(r.identitas || "")}</td>
-        <td style="border:0.6pt solid #000;padding:4pt;width:120pt">${esc(r.ttd || "")}</td>
+        <td style="border:0.6pt solid #000;padding:4pt;text-align:center;width:22pt">${
+          i + 1
+        }</td>
+        <td style="border:0.6pt solid #000;padding:4pt">${esc(
+          r.identitas || ""
+        )}</td>
+        <td style="border:0.6pt solid #000;padding:4pt;width:120pt">${esc(
+          r.ttd || ""
+        )}</td>
       </tr>
-    `).join("");
+    `
+    )
+    .join("");
 
   return `<!DOCTYPE html>
 <html>
@@ -1261,7 +1798,11 @@ function makeDocHTML(v) {
         <td>
           <div class="signLbl">Petugas Survei,</div>
           <div class="ttdBox">
-            ${v.petugasTtdSrc ? `<img class="ttdImg" src="${v.petugasTtdSrc}" />` : "&nbsp;"}
+            ${
+              v.petugasTtdSrc
+                ? `<img class="ttdImg" src="${v.petugasTtdSrc}" />`
+                : "&nbsp;"
+            }
           </div>
           <div class="name">${esc(v.petugasSurvei || "")}</div>
         </td>
@@ -1568,5 +2109,41 @@ const css = `
 }
 .lampiran-hint strong{
   font-weight: 800;
+}
+.input-box {
+  position: relative;
+}
+
+.cidera-inline {
+  display: flex;
+  gap: 16px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.check input {
+  accent-color: #2563eb; /* biru lembut */
+  cursor: pointer;
+}
+.check.active {
+  background: #e0f2fe;
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: #0369a1;
+  font-weight: 800;
+}
+
+.check.active input {
+  accent-color: #0284c7;
 }
 `;

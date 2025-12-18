@@ -7,11 +7,6 @@ const templates = [
 ];
 const SURVEY_TEMPLATE = templates[2];
 
-const cideraOptions = [
-  { value: "MD", label: "MENINGGAL DUNIA (MD)", icon: "🖤" },
-  { value: "LL", label: "LUKA-LUKA (LL)", icon: "🩹" },
-];
-
 const jenisOptions = [
   { value: "keterjaminan", label: "Keterjaminan Korban", icon: "🛡️" },
   { value: "keabsahan_waris", label: "Keabsahan Ahli Waris", icon: "👨‍👩‍👧‍👦" },
@@ -19,17 +14,23 @@ const jenisOptions = [
   // { value: "lainnya", label: "Lainnya", icon: "📝" },
 ];
 
-const toNormalizedTemplate = (templateTitle, sifatCidera) => {
-  // kalau bukan template survey → cuma kunjungan_rs atau kosong
+const toNormalizedTemplate = (templateTitle, jenisSurvei) => {
   if (templateTitle !== SURVEY_TEMPLATE) {
     return templateTitle?.toLowerCase().includes("kunjungan")
       ? "kunjungan_rs"
       : "";
   }
-  // template survey: ikuti MD/LL
-  if (sifatCidera === "MD") return "survei_md";
-  if (sifatCidera === "LL") return "survei_ll";
-  return ""; // belum pilih sifat
+
+  switch (jenisSurvei) {
+    case "keterjaminan":
+      return "survei_ll";
+    case "keabsahan_waris":
+      return "survei_md";
+    case "keabsahan_biaya":
+      return "survei_ll";
+    default:
+      return "";
+  }
 };
 
 export default function Step2({ data: rawData = {}, setData, next, back }) {
@@ -48,7 +49,6 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
   const canNext = useMemo(() => {
     if (!data.template) return false;
     if (isSurvey) {
-      if (!data.sifatCidera) return false;
       if (!data.jenisSurvei) return false;
       if (data.jenisSurvei === "lainnya" && !data.jenisSurveiLainnya?.trim()) return false;
     }
@@ -63,7 +63,7 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
       jenisSurvei: tpl === SURVEY_TEMPLATE ? data.jenisSurvei : "",
       jenisSurveiLainnya: tpl === SURVEY_TEMPLATE ? (data.jenisSurveiLainnya || "") : "",
     };
-    next.template = toNormalizedTemplate(tpl, next.sifatCidera);
+    next.template = toNormalizedTemplate(tpl, next.jenisSurvei);
     setData?.(next);
     setWarn("");
   };
@@ -76,21 +76,13 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
 
     // Kalau template adalah survey
     if (isSurvey) {
-      if (!data.sifatCidera) {
-        setWarn("Pilih sifat cidera (MD / LL).");
-        return;
-      }
       if (!data.jenisSurvei) {
         setWarn("Pilih jenis survei.");
         return;
       }
-      // if (data.jenisSurvei === "lainnya" && !data.jenisSurveiLainnya?.trim()) {
-      //   setWarn("Isi keterangan untuk 'Lainnya'.");
-      //   return;
-      // }
     }
 
-    const normalized = toNormalizedTemplate(data.templateTitle, data.sifatCidera);
+    const normalized = toNormalizedTemplate(data.templateTitle, data.jenisSurvei);
     if (normalized !== data.template) {
       setData?.({ ...data, template: normalized });
     }
@@ -126,34 +118,7 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
       {isSurvey && (
         <>
           <section className="card">
-            <label className="label">Sifat Cidera</label>
-            <div className="seg">
-              {cideraOptions.map((o) => {
-                const active = data.sifatCidera === o.value;
-                return (
-                  <button
-                    key={o.value}
-                    type="button"
-                    className={`pill ${active ? "active" : ""}`}
-                    onClick={() => setData?.({
-                                    ...data,
-                                    sifatCidera: o.value,
-                                    template: toNormalizedTemplate(data.templateTitle, o.value),
-                                  })
-                    }
-                    aria-pressed={active}
-                    title={o.label}
-                  >
-                    <span className="ico">{o.icon}</span>
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="card">
-            <label className="label">Jenis Survei</label>
+            <label className="label">Jenis Laporan Survei</label>
             <div className="seg wrap">
               {jenisOptions.map((o) => {
                 const active = data.jenisSurvei === o.value;
@@ -162,14 +127,17 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
                     key={o.value}
                     type="button"
                     className={`pill ${active ? "active" : ""}`}
-                    onClick={() =>
+                    onClick={() => {
+                      const template = toNormalizedTemplate(data.templateTitle, o.value);
+
                       setData?.({
                         ...data,
                         jenisSurvei: o.value,
+                        template,
                         jenisSurveiLainnya:
                           o.value === "lainnya" ? data.jenisSurveiLainnya || "" : "",
-                      })
-                    }
+                      });
+                    }}
                     aria-pressed={active}
                     title={o.label}
                   >
@@ -212,19 +180,6 @@ export default function Step2({ data: rawData = {}, setData, next, back }) {
           </li>
           {isSurvey && (
             <>
-              <li>
-                <span>🚑</span>
-                <div>
-                  <b>Sifat Cidera</b>
-                  <div className={data.sifatCidera ? "" : "muted"}>
-                    {data.sifatCidera === "MD"
-                      ? "MENINGGAL DUNIA (MD)"
-                      : data.sifatCidera === "LL"
-                      ? "LUKA-LUKA (LL)"
-                      : "— belum dipilih —"}
-                  </div>
-                </div>
-              </li>
               <li>
                 <span>🔎</span>
                 <div>
