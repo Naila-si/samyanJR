@@ -1652,6 +1652,18 @@ function buildPreviewHTML_AW(vv, jenisKey = "LL") {
     display:inline-block; padding:4px 10px; border:1px solid #000; border-radius:4px;
     font-weight:700;
   }
+    .uraian-box {
+      border: 1.2px solid #000 !important;
+      padding: 8px 10px !important;
+      margin-top: 4px;
+      min-height: 90px;     
+      white-space: pre-line !important;
+      text-align: justify !important;
+      text-justify: inter-word;
+      line-height: 1.4;        
+      box-sizing: border-box;
+    }
+
   </style>
 </head>
 <body>
@@ -1734,10 +1746,7 @@ function buildPreviewHTML_AW(vv, jenisKey = "LL") {
 
   <div class="section-gap" style="margin-top:14px;">
     <div style="font-weight:700;">Uraian dan Kesimpulan Hasil Survei :</div>
-    <div style="margin-top:6px; white-space:pre-wrap; min-height:120px;">
-      ${esc(vv.uraian || "")}
-      ${vv.kesimpulan ? "\\nKESIMPULAN:\\n" + esc(vv.kesimpulan) : ""}
-    </div>
+    <div class="uraian-box">${esc((vv.uraian || "").replace(/\n+/g, "\n").trim())}${vv.kesimpulan ? "\n" + esc(vv.kesimpulan).trim() : ""}</div>
   </div>
 
   <div class="section-gap" style="margin-top:12px;">
@@ -3629,6 +3638,20 @@ export default function StatusProses() {
             max-width: 100% !important;
             height: auto !important;
           }
+        }
+        .uraian-box {
+          border: 1.2px solid #000 !important;
+          padding: 8px 10px !important;   
+          margin-top: 4px;              
+
+          min-height: 90px;            
+
+          white-space: pre-line !important;
+          text-align: justify !important;
+          text-justify: inter-word;
+
+          line-height: 1.4;          
+          box-sizing: border-box;
         }
       `}</style>
     </div>

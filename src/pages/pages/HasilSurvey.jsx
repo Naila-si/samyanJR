@@ -1134,62 +1134,34 @@ export default function HasilSurvey({
       </section>
 
       {/* URAIAN & KESIMPULAN */}
-      <section className="card">
-        <label className="label">
-          Uraian & Kesimpulan Hasil Survei{" "}
-          <small className="hint">• Dikte</small>
-          <span
-            className="info-icon cursor-pointer text-blue-500"
-            title={`Tuliskan hasil survei secara ringkas dan jelas, meliputi:\n\n• Nomor polisi / plat kendaraan yang terlibat\n• Nama lokasi kejadian (jalan, kelurahan, kecamatan)\n• Nama pengendara dan korban\n• Jenis kendaraan yang terlibat\n• Kronologi singkat kejadian\n• Hasil pemeriksaan atau keterangan RS (bila ada)\n• Kesimpulan akhir apakah korban terjamin atau tidak`}
-          >
-            ℹ️
-          </span>
-        </label>
+     <section className="card">
+      <label className="label">
+        Uraian & Kesimpulan Hasil Survei{" "}
+        <small className="hint">• Dikte</small>
+        <span
+          className="info-icon"
+          title={`Tuliskan hasil survei secara ringkas dan jelas...`}
+        >
+          ℹ️
+        </span>
+      </label>
 
-        <div className="with-mic input-box">
-          <textarea
-            className="textarea"
-            rows={6}
-            value={v.uraian}
-            onChange={(e) =>
-              setData((prev) => ({
-                ...prev,
-                uraian: e.target.value,
-                uraianSurvei: e.target.value,
-              }))
-            }
-          />
+      {/* TEXTAREA + MIC */}
+      <div className="uraian-wrapper">
+        <textarea
+          className="textarea"
+          rows={6}
+          value={v.uraian}
+          onChange={(e) =>
+            setData((prev) => ({
+              ...prev,
+              uraian: e.target.value,
+              uraianSurvei: e.target.value,
+            }))
+          }
+        />
 
-          <div className="cidera-inline">
-            <label
-              className={`check ${v.sifatCidera === "LL" ? "active" : ""}`}
-            >
-              <input
-                type="radio"
-                name="sifatCidera"
-                checked={v.sifatCidera === "LL"}
-                onChange={() =>
-                  setData((prev) => ({ ...prev, sifatCidera: "LL" }))
-                }
-              />
-              Luka-luka
-            </label>
-
-            <label
-              className={`check ${v.sifatCidera === "MD" ? "active" : ""}`}
-            >
-              <input
-                type="radio"
-                name="sifatCidera"
-                checked={v.sifatCidera === "MD"}
-                onChange={() =>
-                  setData((prev) => ({ ...prev, sifatCidera: "MD" }))
-                }
-              />
-              Meninggal Dunia
-            </label>
-          </div>
-
+        <div className="mic-float">
           <Mic
             onText={(t) =>
               setData((prev) => ({
@@ -1200,32 +1172,51 @@ export default function HasilSurvey({
             }
           />
         </div>
+      </div>
 
-        {/* Badge plat DIPINDAH ke bawah textarea */}
-        {!!detectedPlates.length && (
-          <div className="plat-chips">
-            {detectedPlates.map((p) => (
-              <span
-                key={p}
-                className="chip alt"
-                title={
-                  VEHICLE_DB[p]
-                    ? `${VEHICLE_DB[p].pemilik} • ${VEHICLE_DB[p].deskripsi}`
-                    : "Data plat tidak ada di database"
-                }
-              >
-                {p}
-              </span>
-            ))}
-          </div>
-        )}
+      {/* RADIO */}
+      <div className="cidera-group">
+        <label className={`check ${v.sifatCidera === "LL" ? "active" : ""}`}>
+          <input
+            type="radio"
+            name="sifatCidera"
+            checked={v.sifatCidera === "LL"}
+            onChange={() =>
+              setData((prev) => ({ ...prev, sifatCidera: "LL" }))
+            }
+          />
+          Luka-luka
+        </label>
 
-        {/* INFO PLAT: tampil DI BAWAH tabel */}
-        <div className="info-plat">
-          <div className="label small">Info Plat (auto dari uraian)</div>
-          <pre className="plat-box">{platSummary}</pre>
+        <label className={`check ${v.sifatCidera === "MD" ? "active" : ""}`}>
+          <input
+            type="radio"
+            name="sifatCidera"
+            checked={v.sifatCidera === "MD"}
+            onChange={() =>
+              setData((prev) => ({ ...prev, sifatCidera: "MD" }))
+            }
+          />
+          Meninggal Dunia
+        </label>
+      </div>
+
+      {/* PLAT */}
+      {!!detectedPlates.length && (
+        <div className="plat-chips">
+          {detectedPlates.map((p) => (
+            <span key={p} className="chip alt">
+              {p}
+            </span>
+          ))}
         </div>
-      </section>
+      )}
+
+      <div className="info-plat">
+        <div className="label small">Info Plat (auto dari uraian)</div>
+        <pre className="plat-box">{platSummary}</pre>
+      </div>
+    </section>
 
       {/* LAMPIRAN */}
       <section className="card">
@@ -2145,5 +2136,54 @@ const css = `
 
 .check.active input {
   accent-color: #0284c7;
+}
+/* Wrapper textarea */
+.uraian-wrapper {
+  position: relative;
+}
+
+/* Textarea */
+.textarea {
+  width: 100%;
+  padding: 14px 52px 14px 14px; /* space mic */
+  resize: vertical;
+}
+
+/* Mic floating */
+.mic-float {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+}
+
+/* Radio group */
+.cidera-group {
+  display: flex;
+  gap: 24px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Radio style */
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+/* Desktop aman */
+@media (min-width: 768px) {
+  .cidera-group {
+    justify-content: flex-start;
+  }
+}
+
+/* Mobile tetap cakep */
+@media (max-width: 640px) {
+  .cidera-group {
+    gap: 16px;
+  }
 }
 `;

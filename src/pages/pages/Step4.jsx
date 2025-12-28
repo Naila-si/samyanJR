@@ -658,6 +658,7 @@ export default function Step4({ data, setData, back, next }) {
       const allValid = Object.values(result).every((v) =>
         String(v).startsWith("✅")
       );
+
       if (
         allValid &&
         !hasAutoSavedRef.current &&
@@ -666,13 +667,33 @@ export default function Step4({ data, setData, back, next }) {
       ) {
         isSavingRef.current = true;
         try {
-          const savedId = await saveKunjunganToSupabase(
+          const saved = await saveSurveyToSupabase(
             rawData,
             recordIdRef.current
           );
-          if (savedId) {
+
+          if (saved) {
             hasAutoSavedRef.current = true;
-            setData((prev) => ({ ...prev, formSavedId: savedId }));
+
+            setData((prev) => ({
+              ...prev,
+
+              uraian: [
+                rawData.uraian ?? "",
+                rawData.sifatCidera === "MD"
+                  ? "Korban meninggal dunia."
+                  : "Korban mengalami luka-luka.",
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+
+              kesimpulan:
+                rawData.sifatCidera === "MD"
+                  ? "Berdasarkan hasil survei, korban dinyatakan meninggal dunia."
+                  : "Berdasarkan hasil survei, korban mengalami luka-luka.",
+
+              formSavedId: saved.id ?? saved,
+            }));
           }
         } finally {
           isSavingRef.current = false;
@@ -843,6 +864,13 @@ export default function Step4({ data, setData, back, next }) {
       ? "meninggal"
       : "luka";
 
+    const sifatText =
+      raw.sifatCidera === "MD"
+        ? "Korban meninggal dunia."
+        : raw.sifatCidera === "LL"
+        ? "Korban mengalami luka-luka."
+        : "";
+
     const jenisSurvei =
       typeof raw.jenisSurvei === "string"
         ? raw.jenisSurvei.replace("keabsahan_waris", "keabsahan_ahli_waris")
@@ -966,8 +994,19 @@ export default function Step4({ data, setData, back, next }) {
         typeof raw.hubunganSesuai === "boolean" ? raw.hubunganSesuai : null,
 
       sifat,
-      uraian: raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? null,
-      kesimpulan: raw.kesimpulanSurvei ?? null,
+      uraian: [
+        raw.uraian ?? raw.uraianSurvei ?? raw.uraianKunjungan ?? "",
+        sifatText,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+
+      kesimpulan:
+        raw.kesimpulanSurvei ??
+        (raw.sifatCidera === "MD"
+          ? "Berdasarkan hasil survei, korban dinyatakan meninggal dunia."
+          : "Berdasarkan hasil survei, korban mengalami luka-luka."),
+
       petugas_ttd: petugasTtdUrl,
       foto_survey: uploadedAllFotos,
 
@@ -1140,9 +1179,18 @@ export default function Step4({ data, setData, back, next }) {
     }
     vv.hubunganSesuai = hs ?? "";
 
+    const kesimpulanFinal =
+      rec.sifatCidera === "MD"
+        ? "Berdasarkan hasil survei, korban dinyatakan meninggal dunia."
+        : rec.sifatCidera === "LL"
+        ? "Berdasarkan hasil survei, korban mengalami luka-luka"
+        : rec.kesimpulan || rec.kesimpulanSurvei || "";
+
     vv.uraian =
       (rec.uraianSurvei || rec.uraian || "") +
-      (rec.kesimpulanSurvei ? `\n\nKesimpulan: ${rec.kesimpulanSurvei}` : "");
+      (kesimpulanFinal ? `\n\nKesimpulan: ${kesimpulanFinal}` : "");
+
+    vv.kesimpulan = kesimpulanFinal;
 
     if (!vv.uraian.trim() && rec.uraianKunjungan)
       vv.uraian = rec.uraianKunjungan;
@@ -1751,28 +1799,66 @@ export default function Step4({ data, setData, back, next }) {
     else result.tempatKecelakaan = "✅ Lokasi lengkap";
 
     const isi = (data.uraian || "").toLowerCase();
+
+    /* ===============================
+   DETEKSI JENIS URAIAN
+   =============================== */
+    const isAhliWaris =
+      /(ahli waris|lajang|anak ke|diasuh|kepala keluarga|istri|suami|orang tua|ayah|ibu|bapak)/i.test(
+        isi
+      );
+
+    /* ===============================
+   REGEX SURVEI BIASA
+   =============================== */
     const regexPlat = /[a-z]{1,2}\s?\d{3,4}\s?[a-z]{0,3}/i;
     const regexLokasi =
       /(jalan|jl.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid)/i;
     const regexKendaraan = /(motor|mobil|truk|bus|angkot|sepeda)/i;
     const regexKronologi =
       /(menabrak|bertabrakan|terjatuh|terpeleset|terserempet|terlindas|terbentur|diserempet|mendadak|mengerem)/i;
-    const regexKesimpulan =
+    const regexKesimpulanSurvei =
       /(terjamin|tidak terjamin|dalam pertanggungan|disarankan)/i;
 
-    const uraianCukup =
+    const uraianSurveiCukup =
       isi.length > 50 &&
       regexPlat.test(isi) &&
       regexLokasi.test(isi) &&
       regexKendaraan.test(isi) &&
       regexKronologi.test(isi) &&
-      regexKesimpulan.test(isi);
+      regexKesimpulanSurvei.test(isi);
 
-    if (!data.uraian) result.uraian = "❌ Belum isi uraian & kesimpulan";
-    else if (!uraianCukup)
+    /* ===============================
+   REGEX AHLI WARIS (AW)
+   =============================== */
+    const regexStatusKorban = /(meninggal dunia|meninggal|wafat|tewas)/i;
+
+    const regexHubunganKeluarga =
+      /(anak|orang tua|ayah|ibu|bapak|istri|suami|saudara|diasuh|ahli waris)/i;
+
+    const regexKesimpulanAW =
+      /(terjamin uu\s?34\/1964|tidak terjamin uu\s?34\/1964|dalam pertanggungan uu\s?34\/1964)/i;
+
+    const uraianAWCukup =
+      isi.length > 80 &&
+      regexStatusKorban.test(isi) &&
+      regexHubunganKeluarga.test(isi) &&
+      regexKesimpulanAW.test(isi);
+
+    /* ===============================
+   VALIDASI FINAL URAIAN
+   =============================== */
+    if (!data.uraian) {
+      result.uraian = "❌ Belum isi uraian & kesimpulan";
+    } else if (isAhliWaris && !uraianAWCukup) {
       result.uraian =
-        "❌ Uraian & kesimpulan belum lengkap (harus memuat plat, lokasi, kendaraan, kronologi, dan status terjamin/tidak terjamin)";
-    else result.uraian = "✅ Uraian & kesimpulan lengkap & informatif";
+        "❌ Uraian Ahli Waris belum lengkap (harus menjelaskan status korban, hubungan keluarga/ahli waris, dan kesimpulan UU 34/1964)";
+    } else if (!isAhliWaris && !uraianSurveiCukup) {
+      result.uraian =
+        "❌ Uraian survei belum lengkap (harus memuat plat, lokasi, kendaraan, kronologi, dan status terjamin/tidak terjamin)";
+    } else {
+      result.uraian = "✅ Uraian & kesimpulan lengkap & sesuai ketentuan";
+    }
 
     return Object.entries(result).map(([key, status]) => ({
       key,
