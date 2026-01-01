@@ -443,11 +443,6 @@ html,body{
 .sb-link-group{width:100%; justify-content:space-between;}
 .sb-link-group .chev{margin-left:auto; font-size:12px; opacity:.8;}
 
-.sb-subnav{
-  display:none;
-  margin:6px 0 2px 44px;          /* indent sejajar icon */
-  padding-left:8px; border-left:2px dashed #ffd1d6;
-}
 .sb-group.open .sb-subnav{display:grid; gap:6px;}
 .sb-sublink{
   display:flex; align-items:center; gap:10px; padding:8px 10px;
@@ -474,6 +469,294 @@ html,body{
 
 /* collapse: sembunyikan subnav agar sidebar mini tetap rapi */
 .sidebar-layout.is-collapsed .sb-subnav{display:none !important;}
+/* =========================
+   WRAPPER
+   ========================= */
+.sidebar-layout {
+  display: flex;
+  min-height: 100vh;
+  background: #fff;
+}
+
+/* =========================
+   SIDEBAR
+   ========================= */
+.sb-side {
+  width: 260px;
+  background: #fff;
+  border-right: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.25s ease;
+  z-index: 20;
+}
+
+.sidebar-layout.is-collapsed .sb-side {
+  width: 72px;
+}
+
+/* =========================
+   TOP
+   ========================= */
+.sb-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.sidebar-layout.is-collapsed .sb-top {
+  justify-content: center;
+}
+
+.sb-logo {
+  height: 36px;
+}
+
+.sidebar-layout.is-collapsed .sb-logo {
+  height: 28px;
+}
+
+.sb-collapse {
+  border: none;
+  background: #fdecec;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.sidebar-layout.is-collapsed .sb-collapse {
+  display: none;
+}
+
+/* =========================
+   SECTION TITLE
+   ========================= */
+.sb-sec {
+  font-size: 12px;
+  color: #999;
+  padding: 10px 18px;
+}
+
+.sidebar-layout.is-collapsed .sb-sec {
+  display: none;
+}
+
+/* =========================
+   NAV
+   ========================= */
+.sb-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px;
+}
+
+.sb-link {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  color: #555;
+  text-decoration: none;
+  transition: background 0.2s;
+  position: relative;
+}
+
+.sb-link:hover {
+  background: #fdecec;
+}
+
+.sb-link.active {
+  background: #fdecec;
+  color: #e45b5b;
+}
+
+/* ICON */
+.sb-link .ico {
+  font-size: 20px;
+  min-width: 20px;
+  text-align: center;
+}
+
+/* LABEL */
+.sb-link .label {
+  white-space: nowrap;
+}
+
+/* =========================
+   COLLAPSED MODE
+   ========================= */
+.sidebar-layout.is-collapsed .sb-link {
+  justify-content: center;
+  padding: 12px;
+}
+
+.sidebar-layout.is-collapsed .sb-link .label,
+.sidebar-layout.is-collapsed .sb-link .chev {
+  display: none;
+}
+
+/* ACTIVE INDICATOR */
+.sidebar-layout.is-collapsed .sb-link.active::before {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 20%;
+  height: 60%;
+  width: 4px;
+  background: #e45b5b;
+  border-radius: 4px;
+}
+
+/* =========================
+   SUBMENU
+   ========================= */
+/* default: tersembunyi */
+.sb-subnav {
+  display: none;
+  margin: 6px 0 2px 44px;
+  padding-left: 8px;
+  border-left: 2px dashed #ffd1d6;
+}
+
+/* tampil saat group open */
+.sb-group.open .sb-subnav {
+  display: grid;
+  gap: 6px;
+}
+
+/* collapsed: tetap sembunyi */
+.sidebar-layout.is-collapsed .sb-subnav {
+  display: none !important;
+}
+
+/* peek (hover): MUNCUL LAGI */
+.sidebar-layout.is-peek .sb-group.open .sb-subnav {
+  display: grid !important;
+}
+
+/* =========================
+   USER
+   ========================= */
+.sb-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+}
+
+.sb-user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: #fdecec;
+  color: #e45b5b;
+  display: grid;
+  place-items: center;
+  font-weight: 600;
+}
+
+.sidebar-layout.is-collapsed .sb-user {
+  justify-content: center;
+}
+
+.sidebar-layout.is-collapsed .sb-user-meta {
+  display: none;
+}
+
+/* =========================
+   LOGOUT
+   ========================= */
+.sb-logout {
+  margin: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: none;
+  background: #fef1f1;
+  cursor: pointer;
+}
+
+.sidebar-layout.is-collapsed .sb-logout {
+  font-size: 0;
+}
+
+.sidebar-layout.is-collapsed .sb-logout::before {
+  content: "⏻";
+  font-size: 18px;
+}
+
+.sidebar-layout.is-peek .sb-side {
+  width: 240px;
+  box-shadow: 8px 0 24px rgba(0,0,0,.06);
+}
+
+.sidebar-layout.is-peek .label,
+.sidebar-layout.is-peek .sb-sec,
+.sidebar-layout.is-peek .sb-user-meta {
+  display: block !important;
+}
+
+.sb-tooltip {
+  position: absolute;
+  left: 78px;
+  background: #333;
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-6px);
+  transition: 0.2s ease;
+}
+
+.sidebar-layout.is-collapsed .sb-link:hover .sb-tooltip {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.sb-link .ico {
+  transition: transform 0.25s ease;
+}
+
+.sb-link:hover .ico {
+  transform: scale(1.15);
+}
+
+.sb-link.active .ico {
+  transform: scale(1.2);
+}
+
+.sb-link .label {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.sidebar-layout.is-collapsed .label {
+  opacity: 0;
+  transform: translateX(-6px);
+}
+
+/* =========================
+   MAIN
+   ========================= */
+.sb-main {
+  flex: 1;
+  background: #fafafa;
+}
+
+.sidebar-layout.is-collapsed .sb-link {
+  width: 44px;
+  height: 44px;
+  margin: 6px auto;
+  padding: 0;
+  justify-content: center;
+  border-radius: 14px;
+  background: transparent;
+}
 
 /* =============== MAIN =============== */
 .sb-main{
@@ -527,7 +810,6 @@ html,body{
 .home-layout{ display:grid; grid-template-columns: 260px 1fr; min-height:100vh; background:#fff; }
 .sidebar{ position:sticky; top:0; height:100vh; overflow:auto; background:#fff; border-right:1px solid #f3d9de; padding:16px 14px; }
 .home-main{ padding:18px; background:linear-gradient(180deg,#fff,#fff7f9); }
-
 
 /* ===== Pretty Dashboard (dashx) ===== */
 .dashx { width: min(1200px, 100%); margin-inline: auto; }

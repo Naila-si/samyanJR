@@ -1,13 +1,22 @@
-// src/layouts/SidebarLayout.jsx
 import React, { useState, useEffect } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import "./sidebar.css";
+
+const COLLAPSE_KEY = "sidebar-collapsed";
 
 export default function SidebarLayout() {
   const { user, logout } = useAuth();
-  const [open, setOpen] = useState(false);          // mobile slide-in
-  const [collapsed, setCollapsed] = useState(false); // desktop collapse
+  const [open, setOpen] = useState(false);          
+  const [collapsed, setCollapsed] = useState(() => {
+    return localStorage.getItem(COLLAPSE_KEY) === "true";
+  });
+  const [hoverPeek, setHoverPeek] = useState(false);
   const { pathname } = useLocation();
+
+  useEffect(() => {
+    localStorage.setItem(COLLAPSE_KEY, collapsed);
+  }, [collapsed]);
 
   // buat toggle submenu Data Ahli Waris
   const [awOpen, setAwOpen] = useState(false);
@@ -19,9 +28,11 @@ export default function SidebarLayout() {
 
   return (
     <div
-      className={`sidebar-layout ${open ? "is-open" : ""} ${
-        collapsed ? "is-collapsed" : ""
-      }`}
+      className={`sidebar-layout
+        ${open ? "is-open" : ""}
+        ${collapsed ? "is-collapsed" : ""}
+        ${hoverPeek ? "is-peek" : ""}
+      `}
     >
       {/* SIDEBAR */}
       <aside className="sb-side">
@@ -33,9 +44,7 @@ export default function SidebarLayout() {
 
           <button
             className="sb-collapse"
-            onClick={() => setCollapsed((v) => !v)}
-            title={collapsed ? "Perlebar sidebar" : "Perkecil sidebar"}
-            aria-label="Collapse sidebar"
+            onClick={() => setCollapsed(v => !v)}
           >
             {collapsed ? "›" : "‹"}
           </button>
@@ -44,31 +53,35 @@ export default function SidebarLayout() {
         {/* Bagian Menu */}
         <div className="sb-sec">Menu</div>
         <nav className="sb-nav">
-          <NavLink end to="/home" className="sb-link" title="Overview">
+          <NavLink end to="/home" className="sb-link">
             <span className="ico">🏠</span>
             <span className="label">Overview</span>
+            <span className="sb-tooltip">Overview</span>
           </NavLink>
 
-          <NavLink end to="/datasw" className="sb-link" title="Data SW">
+          <NavLink end to="/datasw" className="sb-link">
             <span className="ico">📊</span>
             <span className="label">Data SW</span>
+            <span className="sb-tooltip">Data SW</span>
           </NavLink>
 
-          <NavLink end to="/dataform" className="sb-link" title="Data Form">
+          <NavLink end to="/dataform" className="sb-link">
             <span className="ico">📁</span>
             <span className="label">Data Form</span>
+            <span className="sb-tooltip">Data Form</span>
           </NavLink>
 
           {/* Group Data Ahli Waris */}
           <div className={`sb-group ${awOpen ? "open" : ""}`}>
-            <button
+           <button
               type="button"
               className="sb-link sb-link-group"
-              onClick={() => setAwOpen((o) => !o)}
+              onClick={() => setAwOpen(o => !o)}
             >
               <span className="ico">👨‍👩‍👧</span>
               <span className="label">Data Ahli Waris</span>
               <span className="chev">{awOpen ? "▾" : "▸"}</span>
+              <span className="sb-tooltip">Data Ahli Waris</span>
             </button>
 
             {awOpen && (
@@ -83,9 +96,10 @@ export default function SidebarLayout() {
             )}
           </div>
 
-          <NavLink end to="/datapks" className="sb-link" title="Data PKS">
-            <span className="ico">🤝</span>
-            <span className="label">Data PKS</span>
+         <NavLink end to="/datapks" className="sb-link">
+           <span className="ico">🤝</span>
+           <span className="label">Data PKS</span>
+           <span className="sb-tooltip">Data PKS</span>
           </NavLink>
         </nav>
 

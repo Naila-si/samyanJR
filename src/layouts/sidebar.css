@@ -1,0 +1,346 @@
+/* ===============================
+   ROOT (opsional, kalau belum ada)
+   =============================== */
+:root{
+  --accent:#b23a48;
+  --accent-soft:#ffe3e7;
+  --accent-hover:#fff1f3;
+  --border:#f1d7dc;
+  --text:#333;
+  --muted:#888;
+}
+
+/* ===============================
+   LAYOUT
+   =============================== */
+.sidebar-layout{
+  display:flex;
+  min-height:100vh;
+  width:100%;
+  background:#faf7f8;
+}
+
+/* ===============================
+   SIDEBAR
+   =============================== */
+.sb-side{
+  width:240px;
+  flex-shrink:0;
+  background:#fff;
+  border-right:1px solid var(--border);
+  padding:16px 12px;
+  display:flex;
+  flex-direction:column;
+  transition:width .25s ease;
+}
+
+.sidebar-layout.is-collapsed .sb-side{
+  width:72px;
+}
+
+/* ===============================
+   TOP
+   =============================== */
+.sb-top{
+  min-height:72px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-bottom:8px;
+}
+
+.sb-brand{
+  display:flex;
+  align-items:center;
+  width:100%;
+}
+
+.sb-logo{
+  max-width:100%;
+  height:auto;
+  transition:all .25s ease;
+}
+
+.sidebar-layout:not(.is-collapsed) .sb-logo{
+  width:160px;
+}
+
+.sidebar-layout.is-collapsed .sb-logo{
+  width:32px;
+  margin:0 auto;
+}
+
+.sb-collapse{
+  border:none;
+  background:var(--accent-soft);
+  color:var(--accent);
+  border-radius:10px;
+  padding:6px 10px;
+  cursor:pointer;
+}
+
+.sidebar-layout.is-collapsed .sb-collapse{
+  display:block;
+  padding:4px 6px;
+  font-size:14px;
+}
+
+
+/* ===============================
+   SECTION TITLE
+   =============================== */
+.sb-sec{
+  margin:14px 0 6px;
+  font-size:12px;
+  font-weight:700;
+  text-transform:uppercase;
+  color:var(--muted);
+}
+
+.sidebar-layout.is-collapsed .sb-sec{
+  display:none;
+}
+
+/* ===============================
+   NAV
+   =============================== */
+.sb-nav{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+/* item utama */
+.sb-link{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:10px 12px;
+  border-radius:12px;
+  text-decoration:none;
+  font-weight:600;
+  color:var(--text);
+  position:relative;
+}
+
+.sb-link:hover{
+  background:var(--accent-hover);
+}
+
+.sb-link.active{
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+
+/* icon */
+.sb-link .ico{
+  font-size:20px;
+  min-width:20px;
+  text-align:center;
+}
+
+/* label */
+.sb-link .label{
+  white-space:nowrap;
+  transition:.2s ease;
+}
+
+/* ===============================
+   COLLAPSED MODE (ICON ONLY)
+   =============================== */
+.sidebar-layout.is-collapsed .sb-link{
+  width:44px;
+  height:44px;
+  padding:0;
+  margin:6px auto;
+  justify-content:center;
+  background:transparent;
+}
+
+.sidebar-layout.is-collapsed .sb-link:hover{
+  background:var(--accent-soft);
+}
+
+.sidebar-layout.is-collapsed .label,
+.sidebar-layout.is-collapsed .chev{
+  display:none;
+}
+
+/* indicator aktif */
+.sidebar-layout.is-collapsed .sb-link.active::before{
+  content:"";
+  position:absolute;
+  left:-6px;
+  top:10px;
+  width:4px;
+  height:24px;
+  background:var(--accent);
+  border-radius:4px;
+}
+
+/* ===============================
+   TOOLTIP (collapsed)
+   =============================== */
+.sb-tooltip{
+  position:absolute;
+  left:64px;
+  top:50%;
+  transform:translateY(-50%) translateX(-6px);
+  background:#333;
+  color:#fff;
+  font-size:12px;
+  padding:6px 10px;
+  border-radius:8px;
+  white-space:nowrap;
+  opacity:0;
+  pointer-events:none;
+  transition:.2s ease;
+}
+
+.sidebar-layout.is-collapsed .sb-link:hover .sb-tooltip{
+  opacity:1;
+  transform:translateY(-50%) translateX(0);
+}
+
+/* ===============================
+   GROUP & SUBMENU
+   =============================== */
+.sb-group{margin-top:2px;}
+
+.sb-link-group{
+  width:100%;
+  background:none;
+  border:none;
+  cursor:pointer;
+}
+
+.sb-link-group .chev{
+  margin-left:auto;
+  font-size:12px;
+  opacity:.7;
+}
+
+/* subnav */
+.sb-subnav{
+  display:none;
+  margin:6px 0 2px 44px;
+  padding-left:8px;
+  border-left:2px dashed var(--border);
+  flex-direction:column;
+  gap:6px;
+}
+
+.sb-group.open .sb-subnav{
+  display:flex;
+}
+
+/* collapsed: sembunyikan submenu */
+.sidebar-layout.is-collapsed .sb-subnav{
+  display:none !important;
+}
+
+/* hover peek: munculkan lagi */
+.sidebar-layout.is-peek .sb-group.open .sb-subnav{
+  display:flex !important;
+}
+
+/* sublink */
+.sb-sublink{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border-radius:10px;
+  text-decoration:none;
+  font-weight:600;
+  color:var(--text);
+}
+
+.sb-sublink:hover{
+  background:var(--accent-hover);
+}
+
+.sb-sublink.active{
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+
+.sb-sublink .dot{
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:var(--accent);
+}
+
+/* ===============================
+   USER
+   =============================== */
+.sb-user{
+  margin-top:auto;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:12px;
+}
+
+.sb-user-avatar{
+  width:36px;
+  height:36px;
+  border-radius:12px;
+  background:var(--accent-soft);
+  color:var(--accent);
+  display:grid;
+  place-items:center;
+  font-weight:700;
+}
+
+.sb-user-name{font-weight:700;}
+.sb-user-role{font-size:12px;color:var(--muted);}
+
+.sidebar-layout.is-collapsed .sb-user{
+  justify-content:center;
+}
+
+.sidebar-layout.is-collapsed .sb-user-name,
+.sidebar-layout.is-collapsed .sb-user-role{
+  display:none;
+}
+
+/* ===============================
+   LOGOUT
+   =============================== */
+.sb-logout{
+  margin:10px 12px 0;
+  padding:10px 12px;
+  border-radius:12px;
+  border:none;
+  background:var(--accent-soft);
+  color:var(--accent);
+  font-weight:700;
+  cursor:pointer;
+}
+
+.sidebar-layout.is-collapsed .sb-logout{
+  width:44px;
+  height:44px;
+  margin:10px auto;
+  padding:0;
+  font-size:0;
+  position:relative;
+}
+
+.sidebar-layout.is-collapsed .sb-logout::before{
+  content:"⏻";
+  font-size:18px;
+  color:var(--accent);
+}
+
+/* ===============================
+   MAIN
+   =============================== */
+.sb-main{
+  flex:1;
+  background:#fafafa;
+  min-width:0;
+}
