@@ -2419,14 +2419,12 @@ async function prepareForOutput(rec) {
     return true;
   });
 
-  const isImage = (nOrUrl = "") => /\.(png|jpe?g|gif|webp|bmp)$/i.test(nOrUrl);
-  vv.allPhotos = files.filter(
-    (f) =>
-      isImage((f.name || "").toLowerCase()) ||
-      isImage((f.url || "").toLowerCase()) ||
-      isImage((f.fileName || "").toLowerCase()) ||
-      f.type === "foto"
-  );
+  vv.allPhotos = files.filter((f) => {
+    if (f.type === "foto") return true;
+    if (f.folder === "survey-images") return true;
+    const s = `${f.name || ""} ${f.fileName || ""} ${f.url || ""}`.toLowerCase();
+    return /\.(png|jpe?g|gif|webp|bmp)$/i.test(s);
+  });
 
   console.log("📸 [prepareForOutput] All photos found:", vv.allPhotos.length);
   vv.allPhotos.forEach((photo, idx) => {

@@ -913,12 +913,19 @@ export default function Step4({ data, setData, back, next }) {
         type: "map",
       });
     }
-    if (raw.attachSurvey?.barcode) {
-      allFotoFiles.push({
-        ...raw.attachSurvey.barcode,
-        label: "Barcode/QR",
-        type: "barcode",
-      });
+    let uploadedBarcode = null;
+
+    if (raw.attachSurvey?.barcode?.url) {
+      try {
+        uploadedBarcode = await uploadFotoToStorage(
+          supabase,
+          raw.attachSurvey.barcode.url, // dataURL
+          "survey-images",
+          recordId
+        );
+      } catch (e) {
+        console.error("❌ Gagal upload QR barcode:", e);
+      }
     }
 
     // ===== kumpulkan foto sumber info
@@ -959,15 +966,22 @@ export default function Step4({ data, setData, back, next }) {
       });
     }
 
-    // ===== upload dokumen wajib
     await uploadSemuaDokumen(raw.attachSurvey || {}, recordId);
 
-    // ===== upload semua foto (folder stabil)
-    const uploadedAllFotos = await uploadFotoSurvey(
+    const uploadedAllFotosRaw = await uploadFotoSurvey(
       allFotoFiles,
       "survey-images",
       recordId
     );
+
+    const uploadedAllFotos = [
+      ...uploadedAllFotosRaw,
+      ...(uploadedBarcode ? [{
+        ...uploadedBarcode,
+        label: "Barcode/QR",
+        category: "barcode",
+      }] : []),
+    ];
     const uploadedSumberInfoFotos = await uploadSumberInformasi(
       allSumberInfoFiles,
       recordId

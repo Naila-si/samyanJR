@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { supabase } from "../../lib/supabaseClient";
+import QRCode from "qrcode";
 
 /* =========================================================
   THEME & UTIL
@@ -1445,26 +1446,55 @@ export default function HasilSurvey({
           )}
         </div>
 
-        {/* Barcode / QR */}
+        {/* Google Maps → QR Code */}
         <div style={{ marginTop: 10 }}>
-          <label className="label">Barcode / QR</label>
+          <label className="label">Link Google Maps</label>
+
           <input
-            type="file"
-            accept="image/*"
+            type="url"
+            className="input"
+            placeholder="Link Google Maps"
+            value={att.mapLink || ""}
             onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
-              const url = await fileToDataURL(f);
-              setAtt({ ...att, barcode: { name: f.name, file: f, url } });
+              const link = e.target.value;
+
+              setAtt({ ...att, mapLink: link });
+
+              if (!link.startsWith("http")) return;
+
+              try {
+                const qrDataURL = await QRCode.toDataURL(link, {
+                  width: 300,
+                  margin: 2,
+                  color: {
+                    dark: "#000000",
+                    light: "#ffffff",
+                  },
+                });
+
+                setAtt({
+                  ...att,
+                  mapLink: link,
+                  barcode: {
+                    url: qrDataURL,
+                    source: "generated",
+                  },
+                });
+              } catch (err) {
+                console.error("Gagal generate QR:", err);
+              }
             }}
           />
+
           {att.barcode?.url && (
             <div className="thumbs">
               <div className="preview">
-                <img src={att.barcode.url} alt="Barcode/QR" />
+                <img src={att.barcode.url} alt="QR Google Maps" />
                 <button
                   className="btn-delete-thumb"
-                  onClick={() => setAtt({ ...att, barcode: null })}
+                  onClick={() =>
+                    setAtt({ ...att, barcode: null, mapLink: "" })
+                  }
                 >
                   ✕
                 </button>
