@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 
 const DEMO = {
-  reg: { email: "registrasi@samyan.id", password: "reg2025!" },
-  ver: { email: "verifikator@samyan.id", password: "ver2025!" },
+  reg: { email: "registrasi@verina.id", password: "register!" },
+  ver: { email: "verifikator@verina.id", password: "verifikasi!" },
 };
 
 export default function Registrasi() {

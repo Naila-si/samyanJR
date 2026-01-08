@@ -77,7 +77,7 @@ const FAQ_ANSWERS = [
   {
     keywords: ["kontak", "bantuan", "helpdesk", "hubungi", "call center"],
     answer:
-      "Bantuan: hubungi admin melalui email helpdesk@samyan.local atau ext. 1234 pada jam kerja.",
+      "Bantuan: hubungi admin melalui email helpdesk@verina.local atau ext. 1234 pada jam kerja.",
   },
 
   /* --- Cukup sering --- */

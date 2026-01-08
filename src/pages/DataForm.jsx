@@ -867,7 +867,7 @@ function DetailModal({ open, data, onClose, onPrint }) {
           <div style={styles.previewCard}>
             <div style={styles.previewHead}>
               <span>Preview Laporan</span>
-              {data?.previewHTML && (
+              {/* {data?.previewHTML && (
                 <button
                   onClick={() => {
                     if (typeof onPrint === "function") {
@@ -881,19 +881,21 @@ function DetailModal({ open, data, onClose, onPrint }) {
                 >
                   🖨️ Cetak
                 </button>
-              )}
+              )} */}
             </div>
             <div style={styles.previewBody}>
               {data?.previewHTML ? (
-                <div
-                  className="laporan-preview"
+                <iframe
+                  title="Preview Laporan"
                   style={{
+                    width: "100%",
+                    height: "80vh",
                     border: "1px solid #ffcade",
-                    padding: 12,
                     borderRadius: 8,
                     background: "#fff",
                   }}
-                  dangerouslySetInnerHTML={{ __html: data.previewHTML }}
+                  sandbox=""
+                  srcDoc={data.previewHTML}
                 />
               ) : (
                 <p style={{ margin: 0, color: "#666" }}>

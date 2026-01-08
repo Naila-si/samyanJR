@@ -3,8 +3,8 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 
 /** Demo users (ganti nanti pakai API) */
 const USERS = [
-  { email: "registrasi@samyan.id", password: "reg2025!", role: "admin-registrasi", name: "Admin Registrasi" },
-  { email: "verifikator@samyan.id", password: "ver2025!", role: "admin-verifikator", name: "Admin Verifikator" },
+  { email: "registrasi@verina.id", password: "register!", role: "admin-registrasi", name: "Admin Registrasi" },
+  { email: "verifikator@verina.id", password: "verifikasi!", role: "admin-verifikator", name: "Admin Verifikator" },
 ];
 
 const LS_KEY = "spa_admin";
