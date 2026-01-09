@@ -697,30 +697,40 @@ export default function HasilKunjungan({
             )}
           </div>
         </div>
-        {/* TTD PETUGAS (PNG) */}
-        <div style={{ marginTop: 14 }}>
-          <label className="label">TTD Petugas (PNG, latar transparan disarankan)</label>
-          <input
-            type="file"
-            accept="image/png"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
-              if (f.type !== "image/png") {
-                alert("Format harus PNG ya 🙏");
-                e.target.value = "";
-                return;
-              }
-              const url = await fileToDataURL(f);
-              setData?.((prev) => ({ ...prev, petugasTtd: url }));
-            }}
-          />
-          {data.petugasTtd && (
-            <div className="ttd-preview">
-              <img src={data.petugasTtd} alt="TTD Petugas" />
-            </div>
-          )}
-        </div>
+        {/* TTD PETUGAS (PNG / JPG / JPEG) */}
+<div style={{ marginTop: 14 }}>
+  <label className="label">
+    TTD Petugas (PNG / JPG / JPEG)
+  </label>
+
+  <input
+    type="file"
+    accept="image/png, image/jpeg, image/jpg"
+    onChange={async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+
+      const allowed = ["image/png", "image/jpeg", "image/jpg"];
+      if (!allowed.includes(f.type)) {
+        alert("Format TTD harus PNG / JPG / JPEG 🙏");
+        e.target.value = "";
+        return;
+      }
+
+      const url = await fileToDataURL(f);
+      setData?.((prev) => ({
+        ...prev,
+        petugasTtd: url,
+      }));
+    }}
+  />
+
+  {data.petugasTtd && (
+    <div className="ttd-preview">
+      <img src={data.petugasTtd} alt="TTD Petugas" />
+    </div>
+  )}
+</div>
       </section>
       <div className="actions">
         <button className="btn ghost" onClick={back}>

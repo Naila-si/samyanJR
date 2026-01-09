@@ -1503,40 +1503,52 @@ export default function HasilSurvey({
           )}
         </div>
 
-        {/* TTD Petugas */}
-        <div style={{ marginTop: 10 }}>
-          <label className="label">
-            TTD Petugas (PNG, latar transparan disarankan)
-          </label>
-          <input
-            type="file"
-            accept="image/png"
-            onChange={async (e) => {
-              const f = e.target.files?.[0];
-              if (!f) return;
-              if (f.type !== "image/png") {
-                alert("Format harus PNG.");
-                return;
-              }
-              const url = await fileToDataURL(f);
-              setAtt({ ...att, petugasTtd: { name: f.name, file: f, url } });
-            }}
-          />
-          {att.petugasTtd?.url && (
-            <div className="thumbs">
-              <div className="preview preview--wide">
-                {/* lebih lebar utk tanda tangan */}
-                <img src={att.petugasTtd.url} alt="TTD Petugas" />
-                <button
-                  className="btn-delete-thumb"
-                  onClick={() => setAtt({ ...att, petugasTtd: null })}
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        {/* TTD Petugas (PNG / JPG / JPEG) */}
+<div style={{ marginTop: 10 }}>
+  <label className="label">
+    TTD Petugas (PNG / JPG / JPEG)
+  </label>
+
+  <input
+    type="file"
+    accept="image/png, image/jpeg, image/jpg"
+    onChange={async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+
+      const allowed = ["image/png", "image/jpeg", "image/jpg"];
+      if (!allowed.includes(f.type)) {
+        alert("Format TTD harus PNG / JPG / JPEG");
+        e.target.value = "";
+        return;
+      }
+
+      const url = await fileToDataURL(f);
+      setAtt({
+        ...att,
+        petugasTtd: {
+          name: f.name,
+          file: f,
+          url,
+        },
+      });
+    }}
+  />
+
+  {att.petugasTtd?.url && (
+    <div className="thumbs">
+      <div className="preview preview--wide">
+        <img src={att.petugasTtd.url} alt="TTD Petugas" />
+        <button
+          className="btn-delete-thumb"
+          onClick={() => setAtt({ ...att, petugasTtd: null })}
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  )}
+</div>
       </section>
 
       {/* AKSI */}
