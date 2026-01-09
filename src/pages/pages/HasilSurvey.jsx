@@ -1135,89 +1135,89 @@ export default function HasilSurvey({
       </section>
 
       {/* URAIAN & KESIMPULAN */}
-     <section className="card">
-      <label className="label">
-        Uraian & Kesimpulan Hasil Survei{" "}
-        <small className="hint">• Dikte</small>
-        <span
-          className="info-icon"
-          title={`Tuliskan hasil survei secara ringkas dan jelas...`}
-        >
-          ℹ️
-        </span>
-      </label>
+      <section className="card">
+        <label className="label">
+          Uraian & Kesimpulan Hasil Survei{" "}
+          <small className="hint">• Dikte</small>
+          <span
+            className="info-icon"
+            title={`Tuliskan hasil survei secara ringkas dan jelas...`}
+          >
+            ℹ️
+          </span>
+        </label>
 
-      {/* TEXTAREA + MIC */}
-      <div className="uraian-wrapper">
-        <textarea
-          className="textarea"
-          rows={6}
-          value={v.uraian}
-          onChange={(e) =>
-            setData((prev) => ({
-              ...prev,
-              uraian: e.target.value,
-              uraianSurvei: e.target.value,
-            }))
-          }
-        />
-
-        <div className="mic-float">
-          <Mic
-            onText={(t) =>
+        {/* TEXTAREA + MIC */}
+        <div className="uraian-wrapper">
+          <textarea
+            className="textarea"
+            rows={6}
+            value={v.uraian}
+            onChange={(e) =>
               setData((prev) => ({
                 ...prev,
-                uraian: `${prev.uraian || ""} ${t}`.trim(),
-                uraianSurvei: `${prev.uraianSurvei || ""} ${t}`.trim(),
+                uraian: e.target.value,
+                uraianSurvei: e.target.value,
               }))
             }
           />
+
+          <div className="mic-float">
+            <Mic
+              onText={(t) =>
+                setData((prev) => ({
+                  ...prev,
+                  uraian: `${prev.uraian || ""} ${t}`.trim(),
+                  uraianSurvei: `${prev.uraianSurvei || ""} ${t}`.trim(),
+                }))
+              }
+            />
+          </div>
         </div>
-      </div>
 
-      {/* RADIO */}
-      <div className="cidera-group">
-        <label className={`check ${v.sifatCidera === "LL" ? "active" : ""}`}>
-          <input
-            type="radio"
-            name="sifatCidera"
-            checked={v.sifatCidera === "LL"}
-            onChange={() =>
-              setData((prev) => ({ ...prev, sifatCidera: "LL" }))
-            }
-          />
-          Luka-luka
-        </label>
+        {/* RADIO */}
+        <div className="cidera-group">
+          <label className={`check ${v.sifatCidera === "LL" ? "active" : ""}`}>
+            <input
+              type="radio"
+              name="sifatCidera"
+              checked={v.sifatCidera === "LL"}
+              onChange={() =>
+                setData((prev) => ({ ...prev, sifatCidera: "LL" }))
+              }
+            />
+            Luka-luka
+          </label>
 
-        <label className={`check ${v.sifatCidera === "MD" ? "active" : ""}`}>
-          <input
-            type="radio"
-            name="sifatCidera"
-            checked={v.sifatCidera === "MD"}
-            onChange={() =>
-              setData((prev) => ({ ...prev, sifatCidera: "MD" }))
-            }
-          />
-          Meninggal Dunia
-        </label>
-      </div>
-
-      {/* PLAT */}
-      {!!detectedPlates.length && (
-        <div className="plat-chips">
-          {detectedPlates.map((p) => (
-            <span key={p} className="chip alt">
-              {p}
-            </span>
-          ))}
+          <label className={`check ${v.sifatCidera === "MD" ? "active" : ""}`}>
+            <input
+              type="radio"
+              name="sifatCidera"
+              checked={v.sifatCidera === "MD"}
+              onChange={() =>
+                setData((prev) => ({ ...prev, sifatCidera: "MD" }))
+              }
+            />
+            Meninggal Dunia
+          </label>
         </div>
-      )}
 
-      <div className="info-plat">
-        <div className="label small">Info Plat (auto dari uraian)</div>
-        <pre className="plat-box">{platSummary}</pre>
-      </div>
-    </section>
+        {/* PLAT */}
+        {!!detectedPlates.length && (
+          <div className="plat-chips">
+            {detectedPlates.map((p) => (
+              <span key={p} className="chip alt">
+                {p}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="info-plat">
+          <div className="label small">Info Plat (auto dari uraian)</div>
+          <pre className="plat-box">{platSummary}</pre>
+        </div>
+      </section>
 
       {/* LAMPIRAN */}
       <section className="card">
@@ -1492,9 +1492,7 @@ export default function HasilSurvey({
                 <img src={att.barcode.url} alt="QR Google Maps" />
                 <button
                   className="btn-delete-thumb"
-                  onClick={() =>
-                    setAtt({ ...att, barcode: null, mapLink: "" })
-                  }
+                  onClick={() => setAtt({ ...att, barcode: null, mapLink: "" })}
                 >
                   ✕
                 </button>
@@ -1504,51 +1502,49 @@ export default function HasilSurvey({
         </div>
 
         {/* TTD Petugas (PNG / JPG / JPEG) */}
-<div style={{ marginTop: 10 }}>
-  <label className="label">
-    TTD Petugas (PNG / JPG / JPEG)
-  </label>
+        <div style={{ marginTop: 10 }}>
+          <label className="label">TTD Petugas (PNG / JPG / JPEG)</label>
 
-  <input
-    type="file"
-    accept="image/png, image/jpeg, image/jpg"
-    onChange={async (e) => {
-      const f = e.target.files?.[0];
-      if (!f) return;
+          <input
+            type="file"
+            accept="image/png, image/jpeg, image/jpg"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
 
-      const allowed = ["image/png", "image/jpeg", "image/jpg"];
-      if (!allowed.includes(f.type)) {
-        alert("Format TTD harus PNG / JPG / JPEG");
-        e.target.value = "";
-        return;
-      }
+              const allowed = ["image/png", "image/jpeg", "image/jpg"];
+              if (!allowed.includes(f.type)) {
+                alert("Format TTD harus PNG / JPG / JPEG");
+                e.target.value = "";
+                return;
+              }
 
-      const url = await fileToDataURL(f);
-      setAtt({
-        ...att,
-        petugasTtd: {
-          name: f.name,
-          file: f,
-          url,
-        },
-      });
-    }}
-  />
+              const url = await fileToDataURL(f);
+              setAtt({
+                ...att,
+                petugasTtd: {
+                  name: f.name,
+                  file: f,
+                  url,
+                },
+              });
+            }}
+          />
 
-  {att.petugasTtd?.url && (
-    <div className="thumbs">
-      <div className="preview preview--wide">
-        <img src={att.petugasTtd.url} alt="TTD Petugas" />
-        <button
-          className="btn-delete-thumb"
-          onClick={() => setAtt({ ...att, petugasTtd: null })}
-        >
-          ✕
-        </button>
-      </div>
-    </div>
-  )}
-</div>
+          {att.petugasTtd?.url && (
+            <div className="thumbs">
+              <div className="preview preview--wide">
+                <img src={att.petugasTtd.url} alt="TTD Petugas" />
+                <button
+                  className="btn-delete-thumb"
+                  onClick={() => setAtt({ ...att, petugasTtd: null })}
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* AKSI */}

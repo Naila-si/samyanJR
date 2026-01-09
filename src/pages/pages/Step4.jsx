@@ -987,6 +987,26 @@ export default function Step4({ data, setData, back, next }) {
       recordId
     );
 
+    // 🔥 inject hasil upload ke raw.sumbers
+    const sumbersWithUploadedFotos = (raw.sumbers || []).map(
+      (sumber, index) => {
+        const fotos = uploadedSumberInfoFotos.filter(
+          (f) => f.sumberIndex === index
+        );
+
+        return {
+          identitas: sumber.identitas || "",
+          foto: fotos.map((f) => ({
+            name: f.name,
+            fileName: f.fileName,
+            url: f.url,
+            uploadedAt: f.uploadedAt,
+          })),
+          foto_count: fotos.length,
+        };
+      }
+    );
+
     const sumbersLite = Array.isArray(raw.sumbers)
       ? raw.sumbers.map((r) => ({ identitas: r?.identitas || "" }))
       : [];
@@ -1038,53 +1058,23 @@ export default function Step4({ data, setData, back, next }) {
         sumber_info_count: uploadedSumberInfoFotos.length,
       },
 
-      sumbers: sumbersLite,
+      sumbers: sumbersWithUploadedFotos,
+      sumbers_paths: uploadedSumberInfoFotos,
       local_id: recordId,
     };
 
     try {
       const { data: inserted, error: insErr } = await supabase
         .from("form_survei_aw")
-        .insert(payload, { returning: "representation" })
+        .insert(payload)
         .select()
         .single();
 
       if (insErr) throw insErr;
 
-      const surveyId = inserted.id;
-
-      const sumbersWithUploadedFotos = (raw.sumbers || []).map(
-        (sumber, index) => {
-          const uploadedFotosForSumber = uploadedSumberInfoFotos.filter(
-            (f) => f.sumberIndex === index
-          );
-
-          return {
-            identitas: sumber.identitas || "",
-            foto: uploadedFotosForSumber.map((f) => ({
-              name: f.name,
-              fileName: f.fileName,
-              url: f.url,
-              uploadedAt: f.uploadedAt,
-            })),
-            foto_count: uploadedFotosForSumber.length,
-          };
-        }
-      );
-
-      const { error: updErr } = await supabase
-        .from("form_survei_aw")
-        .update({
-          sumbers: sumbersWithUploadedFotos,
-          sumbers_paths: uploadedSumberInfoFotos,
-        })
-        .eq("id", surveyId);
-
-      if (updErr) throw updErr;
-
       toast.success("✅ Data survei tersimpan");
       return {
-        id: surveyId,
+        id: inserted.id,
         fotoSurvey: uploadedAllFotos,
         fotoSumberInfo: uploadedSumberInfoFotos,
       };
@@ -1830,7 +1820,7 @@ export default function Step4({ data, setData, back, next }) {
       /(jalan|jl.|simpang|dekat|seberang|kelurahan|kecamatan|kota|gedung|ruko|plaza|masjid)/i;
     const regexKendaraan = /(motor|mobil|truk|bus|angkot|sepeda)/i;
     const regexKronologi =
-      /(menabrak|bertabrakan|terjatuh|terpeleset|terserempet|terlindas|terbentur|diserempet|mendadak|mengerem)/i;
+      /(menabrak|bertabrakan|tabrakan|tertabrak|menyerempet|diserempet|tersenggol|terjatuh|terlempar|terpental|tergelincir|terlindas|terbentur|rem mendadak|melawan arus|dari arah belakang|dari belakang|pindah jalur|memotong jalur|mendahului)/i;
     const regexKesimpulanSurvei =
       /(terjamin|tidak terjamin|dalam pertanggungan|disarankan)/i;
 

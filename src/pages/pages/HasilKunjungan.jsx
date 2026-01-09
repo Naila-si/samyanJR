@@ -251,7 +251,8 @@ export default function HasilKunjungan({
       v.tanggalKecelakaan.trim() &&
       v.tglMasukRS.trim() &&
       // v.tglJamNotifikasi.trim() &&
-      v.tglJamKunjungan.trim() && !!v.petugasTtd,
+      v.tglJamKunjungan.trim() &&
+      !!v.petugasTtd,
     [v]
   );
 
@@ -278,16 +279,21 @@ export default function HasilKunjungan({
           const remoteRows = Array.isArray(remote)
             ? remote
             : Array.isArray(remote?.data)
-              ? remote.data
-              : Array.isArray(remote?.rows)
-                ? remote.rows
-                : [];
+            ? remote.data
+            : Array.isArray(remote?.rows)
+            ? remote.rows
+            : [];
           if (remoteRows.length) {
             rows = remoteRows;
             localStorage.setItem(LS_KEY, JSON.stringify(rows));
-            try { window.dispatchEvent(new CustomEvent("datapks:changed")); } catch {}
+            try {
+              window.dispatchEvent(new CustomEvent("datapks:changed"));
+            } catch {}
           } else {
-            console.warn("[HasilKunjungan] fetchAllDataPks tidak mengembalikan array. Bentuk:", remote);
+            console.warn(
+              "[HasilKunjungan] fetchAllDataPks tidak mengembalikan array. Bentuk:",
+              remote
+            );
           }
         } catch (e) {
           console.warn("[HasilKunjungan] fallback fetchAllDataPks gagal:", e);
@@ -295,30 +301,39 @@ export default function HasilKunjungan({
       }
 
       // 3) Bentuk list nama RS unik
-      const names = rows.map(r => {
-        const n =
-          r?.namaRS ??
-          r?.nama_rs ??
-          r?.namaRumahSakit ??
-          r?.rumahSakit ??
-          r?.rs_name ??
-          r?.rsName ??
-          "";
-        return String(n).trim();
-      }).filter(Boolean);
+      const names = rows
+        .map((r) => {
+          const n =
+            r?.namaRS ??
+            r?.nama_rs ??
+            r?.namaRumahSakit ??
+            r?.rumahSakit ??
+            r?.rs_name ??
+            r?.rsName ??
+            "";
+          return String(n).trim();
+        })
+        .filter(Boolean);
 
       const seen = new Set();
       const out = [];
       for (const n of names) {
         const k = n.toLowerCase();
-        if (!seen.has(k)) { seen.add(k); out.push(n); }
+        if (!seen.has(k)) {
+          seen.add(k);
+          out.push(n);
+        }
       }
-      out.sort((a,b) => a.localeCompare(b, "id"));
+      out.sort((a, b) => a.localeCompare(b, "id"));
       setRsOptions(out);
-      console.log("[HasilKunjungan] rsOptions.count =", out.length, out.slice(0, 10));
+      console.log(
+        "[HasilKunjungan] rsOptions.count =",
+        out.length,
+        out.slice(0, 10)
+      );
     } catch (e) {
       console.error("[HasilKunjungan] loadRsOptions error:", e);
-      setRsOptions([]); 
+      setRsOptions([]);
     }
   };
 
@@ -468,7 +483,9 @@ export default function HasilKunjungan({
                 onResult={(t) =>
                   setData?.((prev) => ({
                     ...prev,
-                    lokasiKecelakaan: `${prev.lokasiKecelakaan || ""} ${t}`.trim(),
+                    lokasiKecelakaan: `${
+                      prev.lokasiKecelakaan || ""
+                    } ${t}`.trim(),
                   }))
                 }
               />
@@ -487,7 +504,9 @@ export default function HasilKunjungan({
               placeholder="Ketik nama RS, pilih bila muncul…"
             />
             <datalist id="rs-master">
-              {rsOptions.map(n => <option key={n} value={n} />)}
+              {rsOptions.map((n) => (
+                <option key={n} value={n} />
+              ))}
             </datalist>
           </div>
 
@@ -693,44 +712,44 @@ export default function HasilKunjungan({
                 })}
               </div>
             ) : (
-              <div style={{ padding: "1rem", color: "#888" }}>Belum ada foto</div>
+              <div style={{ padding: "1rem", color: "#888" }}>
+                Belum ada foto
+              </div>
             )}
           </div>
         </div>
         {/* TTD PETUGAS (PNG / JPG / JPEG) */}
-<div style={{ marginTop: 14 }}>
-  <label className="label">
-    TTD Petugas (PNG / JPG / JPEG)
-  </label>
+        <div style={{ marginTop: 14 }}>
+          <label className="label">TTD Petugas (PNG / JPG / JPEG)</label>
 
-  <input
-    type="file"
-    accept="image/png, image/jpeg, image/jpg"
-    onChange={async (e) => {
-      const f = e.target.files?.[0];
-      if (!f) return;
+          <input
+            type="file"
+            accept="image/png, image/jpeg, image/jpg"
+            onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
 
-      const allowed = ["image/png", "image/jpeg", "image/jpg"];
-      if (!allowed.includes(f.type)) {
-        alert("Format TTD harus PNG / JPG / JPEG 🙏");
-        e.target.value = "";
-        return;
-      }
+              const allowed = ["image/png", "image/jpeg", "image/jpg"];
+              if (!allowed.includes(f.type)) {
+                alert("Format TTD harus PNG / JPG / JPEG 🙏");
+                e.target.value = "";
+                return;
+              }
 
-      const url = await fileToDataURL(f);
-      setData?.((prev) => ({
-        ...prev,
-        petugasTtd: url,
-      }));
-    }}
-  />
+              const url = await fileToDataURL(f);
+              setData?.((prev) => ({
+                ...prev,
+                petugasTtd: url,
+              }));
+            }}
+          />
 
-  {data.petugasTtd && (
-    <div className="ttd-preview">
-      <img src={data.petugasTtd} alt="TTD Petugas" />
-    </div>
-  )}
-</div>
+          {data.petugasTtd && (
+            <div className="ttd-preview">
+              <img src={data.petugasTtd} alt="TTD Petugas" />
+            </div>
+          )}
+        </div>
       </section>
       <div className="actions">
         <button className="btn ghost" onClick={back}>
@@ -870,7 +889,9 @@ function pageKunjungan(v) {
     </div>
     <div>
       <div class="lbl">Petugas yang Melaksanakan Kunjungan,</div>
-      <div class="space">${petugasSrc ? `<img src="${petugasSrc}" class="sign-img" />` : ""}</div>
+      <div class="space">${
+        petugasSrc ? `<img src="${petugasSrc}" class="sign-img" />` : ""
+      }</div>
       <div class="name">${escapeHtml(
         v.petugas || "Nama .................................................."
       )}</div>
