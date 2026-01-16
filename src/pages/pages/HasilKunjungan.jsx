@@ -157,15 +157,15 @@ export default function HasilKunjungan({
   back,
   playBeep,
 }) {
-  const set = (k) => (e) => setData?.({ ...data, [k]: e.target.value });
+  const set = (k) => (e) =>
+   setData?.((prev) => ({ ...prev, [k]: e.target.value }));
 
-  // daftar dokumen (biarkan 1 jenis dulu — bisa ditambah)
-  const [docs, setDocs] = useState([{ type: "kunjungan", id: 1 }]);
-  const [showAddDoc, setShowAddDoc] = useState(false);
+  const [docs] = useState([{ type: "kunjungan", id: 1 }]);
 
   // tanda tangan
   const ttdMode = data.ttdMode || "image"; // "image" | "none"
-  const setTtdMode = (mode) => setData?.({ ...data, ttdMode: mode });
+  const setTtdMode = (mode) =>
+    setData?.((prev) => ({ ...prev, ttdMode: mode }));
 
   const [fotoList, setFotoList] = useState(data.fotoSurveyList || []);
   const [rsList, setRsList] = useState(data.laporanRSList || []);
@@ -176,17 +176,7 @@ export default function HasilKunjungan({
       fotoSurveyList: fotoList,
       laporanRSList: rsList,
     }));
-  }, [fotoList, rsList]);
-
-  // === Konversi File ke Base64 ===
-  async function fileToDataURL(file) {
-    return new Promise((resolve, reject) => {
-      const fr = new FileReader();
-      fr.onload = () => resolve(fr.result);
-      fr.onerror = reject;
-      fr.readAsDataURL(file);
-    });
-  }
+  }, [fotoList, rsList, setData]);
 
   // === Upload Foto Survey ===
   const onUploadFoto = async (e) => {
@@ -204,7 +194,7 @@ export default function HasilKunjungan({
     setFotoList((prev) => {
       const names = new Set(prev.map((x) => x.name));
       const merged = [...prev, ...converted.filter((x) => !names.has(x.name))];
-      setData?.((d) => ({ ...d, fotoSurveyList: merged }));
+      setData?.((prev2) => ({ ...prev2, fotoSurveyList: merged }));
       return merged;
     });
 
@@ -260,7 +250,11 @@ export default function HasilKunjungan({
     const file = e.target.files?.[0];
     if (!file) return;
     const dataURL = await fileToDataURL(file);
-    setData?.({ ...data, pejabatMengetahuiTtd: dataURL, ttdMode: "image" });
+    setData?.((prev) => ({
+      ...prev,
+      pejabatMengetahuiTtd: dataURL,
+      ttdMode: "image",
+    }));
   };
 
   // --- RS options dari Data PKS (localStorage) ---
@@ -276,6 +270,7 @@ export default function HasilKunjungan({
       // 2) Kalau kosong → fetch dari Supabase (fallback)
       if (!rows.length) {
         try {
+          const remote = await fetchAllDataPks();
           const remoteRows = Array.isArray(remote)
             ? remote
             : Array.isArray(remote?.data)
@@ -421,7 +416,10 @@ export default function HasilKunjungan({
               />
               <DictationButton
                 onResult={(t) =>
-                  setData?.({ ...data, petugas: `${v.petugas} ${t}`.trim() })
+                  setData?.((prev) => ({
+                    ...prev,
+                    petugas: `${prev.petugas || ""} ${t}`.trim(),
+                  }))
                 }
               />
             </div>
@@ -455,7 +453,10 @@ export default function HasilKunjungan({
               />
               <DictationButton
                 onResult={(t) =>
-                  setData?.({ ...data, korban: `${v.korban} ${t}`.trim() })
+                  setData?.((prev) => ({
+                    ...prev,
+                    korban: `${prev.korban || ""} ${t}`.replace(/\s+/g, " ").trim(),
+                  }))
                 }
               />
             </div>
@@ -483,9 +484,7 @@ export default function HasilKunjungan({
                 onResult={(t) =>
                   setData?.((prev) => ({
                     ...prev,
-                    lokasiKecelakaan: `${
-                      prev.lokasiKecelakaan || ""
-                    } ${t}`.trim(),
+                    lokasiKecelakaan: `${prev.lokasiKecelakaan || ""} ${t}`.replace(/\s+/g, " ").trim(),
                   }))
                 }
               />
@@ -516,7 +515,7 @@ export default function HasilKunjungan({
               <input
                 type="date"
                 className="input"
-                value={data.tanggalKecelakaan}
+                value={v.tanggalKecelakaan}
                 onChange={set("tanggalKecelakaan")}
               />
             </div>
@@ -586,10 +585,10 @@ export default function HasilKunjungan({
           />
           <DictationButton
             onResult={(t) =>
-              setData?.({
-                ...data,
-                uraianKunjungan: `${v.uraianKunjungan} ${t}`.trim(),
-              })
+              setData?.((prev) => ({
+                ...prev,
+                uraianKunjungan: `${prev.uraianKunjungan || ""} ${t}`.replace(/\s+/g, " ").trim(),
+              }))
             }
           />
         </div>
@@ -618,10 +617,10 @@ export default function HasilKunjungan({
           />
           <DictationButton
             onResult={(t) =>
-              setData?.({
-                ...data,
-                rekomendasi: `${v.rekomendasi} ${t}`.trim(),
-              })
+              setData?.((prev) => ({
+                ...prev,
+                rekomendasi: `${prev.rekomendasi || ""} ${t}`.replace(/\s+/g, " ").trim(),
+              }))
             }
           />
         </div>

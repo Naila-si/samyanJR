@@ -541,8 +541,8 @@ export default function Step4({ data, setData, back, next }) {
 
   // ===== sync att -> data global
   useEffect(() => {
-    setData?.({ ...data, attachSurvey: att });
-  }, [att]);
+    setData?.((prev) => ({ ...prev, attachSurvey: att }));
+  }, [att, setData]);
 
   // ===== setup pdfjs worker (sekali)
   useEffect(() => {
@@ -661,23 +661,18 @@ export default function Step4({ data, setData, back, next }) {
 
       if (
         allValid &&
+        !rawData.isSurvey &&
         !hasAutoSavedRef.current &&
         !isSavingRef.current &&
         !rawData.formSavedId
       ) {
         isSavingRef.current = true;
         try {
-          const saved = await saveSurveyToSupabase(
-            rawData,
-            recordIdRef.current
-          );
-
-          if (saved) {
+          const savedId = await saveKunjunganToSupabase(rawData, recordIdRef.current);
+          if (savedId) {
             hasAutoSavedRef.current = true;
-
             setData((prev) => ({
               ...prev,
-
               uraian: [
                 rawData.uraian ?? "",
                 rawData.sifatCidera === "MD"
@@ -692,7 +687,8 @@ export default function Step4({ data, setData, back, next }) {
                   ? "Berdasarkan hasil survei, korban dinyatakan meninggal dunia."
                   : "Berdasarkan hasil survei, korban mengalami luka-luka.",
 
-              formSavedId: saved.id ?? saved,
+              formSavedId: savedId,
+              tersimpan: true,
             }));
           }
         } finally {
@@ -816,10 +812,12 @@ export default function Step4({ data, setData, back, next }) {
         korban: rawData.korban?.trim() || null,
         rumah_sakit: rawData.rumahSakit?.trim() || null,
         lokasi_kecelakaan: rawData.lokasiKecelakaan?.trim() || null,
-        tanggal_kecelakaan: toIso(rawData.tanggalKecelakaan),
-        tgl_masuk_rs: toIso(rawData.tglMasukRS),
-        tgl_jam_notifikasi: toIso(rawData.tglJamNotifikasi),
-        tgl_jam_kunjungan: toIso(rawData.tglJamKunjungan),
+
+        tanggal_kecelakaan: toIso(rawData.tanggalKecelakaan || rawData.tglKecelakaan),
+        tgl_masuk_rs: toIso(rawData.tglMasukRS || rawData.tanggalMasukRS),
+        tgl_jam_notifikasi: toIso(rawData.tglJamNotifikasi || rawData.tanggalJamNotifikasi),
+        tgl_jam_kunjungan: toIso(rawData.tglJamKunjungan || rawData.tanggalJamKunjungan),
+
         uraian: rawData.uraianKunjungan?.trim() || null,
         rekomendasi: rawData.rekomendasi?.trim() || null,
         petugas_ttd: ttdUrl || null,
@@ -2375,16 +2373,12 @@ export default function Step4({ data, setData, back, next }) {
       if (savedId) {
         hasManualSavedRef.current = true;
 
-        setData((prev) => ({
-          ...prev,
-          formSavedId: savedId,
-          tersimpan: true,
-        }));
+        const savedIdOnly = savedId?.id ?? savedId;
+        setData((prev) => ({ ...prev, formSavedId: savedIdOnly, tersimpan: true }));
 
-        if (data.isSurvey && savedId?.id) {
-          await createDraftWarisIfMD(savedId, data);
+        if (data.isSurvey) {
+          await createDraftWarisIfMD(savedIdOnly, data);
         }
-
         next();
       }
     } catch (err) {
@@ -2431,7 +2425,7 @@ export default function Step4({ data, setData, back, next }) {
         <SummaryRow label="Korban" value={data.korban || "-"} />
         <SummaryRow
           label="Tanggal Kecelakaan"
-          value={data.tglKecelakaan || "-"}
+          value={data.tanggalKecelakaan || data.tglKecelakaan || "-"}
         />
         <SummaryRow label="Template" value={data.template || "-"} />
         <SummaryRow
